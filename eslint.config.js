@@ -12,7 +12,8 @@ export default tseslint.config(
     extends: [
       js.configs.recommended,
       ...tseslint.configs.recommended,
-      reactHooks.configs['recommended-latest'],
+      // v7 keeps the eslintrc-style configs at the top level; the flat ones live here.
+      reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
       prettier,
     ],

@@ -1,4 +1,7 @@
 dist
 node_modules
 package-lock.json
-docs/skill-tree.json
+
+# Source of truth, authored by hand. Never reformat.
+docs
+CLAUDE.md
