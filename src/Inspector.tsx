@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Midi } from 'tonal';
 import {
   DEFAULT_SPLIT_POINT,
+  ccLabel,
   handOf,
   midi,
   useHeldNotes,
@@ -19,6 +20,17 @@ import type { NormalizedEvent } from './midi.ts';
 const hex = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
 const noteName = (pitch: number) =>
   pitch < 0 ? '' : (Midi.midiToNoteName(pitch) ?? '?');
+
+type LogFilter = 'all' | 'notes' | 'cc';
+
+const FILTERS: { id: LogFilter; label: string }[] = [
+  { id: 'all', label: 'all' },
+  { id: 'notes', label: 'notes' },
+  { id: 'cc', label: 'CC' },
+];
+
+const matchesFilter = (e: NormalizedEvent, filter: LogFilter) =>
+  filter === 'all' || (filter === 'cc' ? e.type === 'cc' : e.type !== 'cc');
 
 function StatusBanner() {
   const state = useMidiState();
@@ -76,17 +88,20 @@ function Counters({ log }: { log: NormalizedEvent[] }) {
   const state = useMidiState();
   const { counts } = state;
   const velocities = [...state.velocitiesSeen].sort((a, b) => a - b);
-  const channels = useMemo(
-    () => [...new Set(log.map((e) => e.channel))].sort((a, b) => a - b),
+
+  // Scoped to note events on purpose. Control change traffic legitimately
+  // arrives on other channels, and letting it in here would make the hardware
+  // assertion about *notes* go red for an unrelated reason.
+  const noteChannels = useMemo(
+    () => [...new Set(log.filter((e) => e.type !== 'cc').map((e) => e.channel))].sort(),
     [log]
   );
   const syntheticTs = useMemo(() => log.some((e) => e.tsSynthetic), [log]);
 
-  // These two assertions are the hardware facts from CLAUDE.md. If either ever
-  // goes red, a downstream assumption is wrong and the graders need revisiting.
   const velocityOk =
     velocities.length === 0 || (velocities.length === 1 && velocities[0] === 100);
-  const channelOk = channels.length <= 1 && (channels.length === 0 || channels[0] === 1);
+  const channelOk =
+    noteChannels.length <= 1 && (noteChannels.length === 0 || noteChannels[0] === 1);
 
   return (
     <div className="panel">
@@ -118,7 +133,7 @@ function Counters({ log }: { log: NormalizedEvent[] }) {
         </li>
         <li className={channelOk ? 'ok' : 'bad'}>
           all notes on channel 1:{' '}
-          <code>{channels.length ? channels.join(', ') : 'no data yet'}</code>
+          <code>{noteChannels.length ? noteChannels.join(', ') : 'no data yet'}</code>
         </li>
         <li className={syntheticTs ? 'bad' : 'ok'}>
           driver supplies real timestamps:{' '}
@@ -153,10 +168,93 @@ function HeldNotes({ splitPoint }: { splitPoint: number }) {
   );
 }
 
+/**
+ * Per-controller breakdown. Aggregated in the ingest rather than derived from
+ * the visible log, so a burst at power-on is still readable after the ring
+ * buffer has rolled past it.
+ */
+function CcBreakdown({ onShowCc }: { onShowCc: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const rows = [...midi.ccProfile.values()].sort(
+    (a, b) => a.channel - b.channel || a.num - b.num
+  );
+  if (rows.length === 0) return null;
+
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  const t0 = Math.min(...rows.map((r) => r.firstTs));
+  const channels = [...new Set(rows.map((r) => r.channel))];
+  // Rows are per controller *per channel*, so count the distinct controllers
+  // separately or a 7-controller reset across 4 channels reads as 28 of them.
+  const controllers = new Set(rows.map((r) => r.num)).size;
+
+  const copy = () => {
+    const report = midi.ccReport();
+    void navigator.clipboard
+      .writeText(report)
+      .then(() => setCopied('copied'))
+      .catch(() => {
+        // Clipboard access can be denied. The report is the point, not the
+        // clipboard, so put it somewhere it can still be read.
+        console.log(report);
+        setCopied('see console');
+      })
+      .finally(() => setTimeout(() => setCopied(null), 2000));
+  };
+
+  return (
+    <div className="panel wide">
+      <h2>
+        Control change breakdown
+        <span className="h2-note">
+          {total} message{total === 1 ? '' : 's'} · {controllers} controller
+          {controllers === 1 ? '' : 's'} · channel{channels.length === 1 ? '' : 's'}{' '}
+          {channels.join(', ')}
+        </span>
+        <span className="h2-actions">
+          <button onClick={onShowCc}>show CC rows</button>
+          <button onClick={copy}>{copied ?? 'copy report'}</button>
+        </span>
+      </h2>
+      <table className="cc-table">
+        <thead>
+          <tr>
+            <th>CC</th>
+            <th>controller</th>
+            <th>ch</th>
+            <th>count</th>
+            <th>distinct values</th>
+            <th>last</th>
+            <th>first seen</th>
+            <th>last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.channel}:${r.num}`}>
+              <td className="strong">{r.num}</td>
+              <td>{ccLabel(r.num)}</td>
+              <td className="dim">{r.channel}</td>
+              <td>{r.count}</td>
+              <td className="dim">
+                {r.values.join(', ')}
+                {r.values.length >= 12 ? ' ...' : ''}
+              </td>
+              <td>{r.last}</td>
+              <td className="dim">{(r.firstTs - t0).toFixed(0)}ms</td>
+              <td className="dim">{(r.lastTs - t0).toFixed(0)}ms</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function Inspector() {
   const [paused, setPaused] = useState(false);
   const [autoscroll, setAutoscroll] = useState(true);
   const [splitPoint, setSplitPoint] = useState(DEFAULT_SPLIT_POINT);
+  const [filter, setFilter] = useState<LogFilter>('all');
   const { log, clear } = useMidiLog(paused);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -167,10 +265,16 @@ export default function Inspector() {
   useEffect(() => {
     if (!autoscroll || !bodyRef.current) return;
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-  }, [log, autoscroll]);
+  }, [log, autoscroll, filter]);
 
+  // t0 comes from the unfiltered log so the timeline does not shift when the
+  // filter changes.
   const t0 = log[0]?.ts ?? 0;
-  const rows = log.slice(-400);
+  const filtered = useMemo(
+    () => (filter === 'all' ? log : log.filter((e) => matchesFilter(e, filter))),
+    [log, filter]
+  );
+  const rows = filtered.slice(-400);
 
   return (
     <div className="inspector">
@@ -181,11 +285,24 @@ export default function Inspector() {
         <HeldNotes splitPoint={splitPoint} />
       </div>
 
+      <CcBreakdown onShowCc={() => setFilter('cc')} />
+
       <div className="toolbar">
         <button onClick={() => setPaused((p) => !p)}>
           {paused ? 'Resume' : 'Pause'}
         </button>
         <button onClick={clear}>Clear</button>
+        <span className="segmented">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              className={filter === f.id ? 'active' : undefined}
+              onClick={() => setFilter(f.id)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </span>
         <label>
           <input
             type="checkbox"
@@ -206,8 +323,8 @@ export default function Inspector() {
           <span className="muted">{noteName(splitPoint)}</span>
         </label>
         <span className="muted grow">
-          {log.length} event{log.length === 1 ? '' : 's'}
-          {log.length > rows.length ? ` (showing last ${rows.length})` : ''}
+          {filtered.length} of {log.length} event{log.length === 1 ? '' : 's'}
+          {filtered.length > rows.length ? ` (showing last ${rows.length})` : ''}
         </span>
       </div>
 
@@ -239,7 +356,11 @@ export default function Inspector() {
                   <td>{(e.ts - t0).toFixed(1)}</td>
                   <td className="dim">{prev ? `+${delta.toFixed(1)}` : ''}</td>
                   <td className={`type ${e.type}`}>{e.type}</td>
-                  <td>{e.type === 'cc' ? `CC${e.cc?.num}` : noteName(e.pitch)}</td>
+                  <td>
+                    {e.type === 'cc'
+                      ? `CC${e.cc?.num} ${ccLabel(e.cc?.num ?? -1)}`
+                      : noteName(e.pitch)}
+                  </td>
                   <td className="dim">{e.type === 'cc' ? (e.cc?.val ?? '') : e.pitch}</td>
                   <td className="dim">
                     {e.type === 'cc' ? '' : handOf(e.pitch, splitPoint)}
@@ -258,9 +379,11 @@ export default function Inspector() {
             })}
           </tbody>
         </table>
-        {log.length === 0 && (
+        {rows.length === 0 && (
           <p className="empty">
-            Waiting for MIDI. Press a key on the CTK-2400 and events appear here.
+            {log.length === 0
+              ? 'Waiting for MIDI. Press a key on the CTK-2400 and events appear here.'
+              : `No ${filter === 'cc' ? 'control change' : 'note'} events in the log.`}
           </p>
         )}
       </div>
