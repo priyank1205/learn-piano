@@ -1,0 +1,1529 @@
+{
+  "meta": {
+    "version": 1,
+    "generated": "2026-08-12",
+    "instrument": {
+      "model": "Casio CTK-2400",
+      "keys": 61,
+      "assumedRange": "MIDI 36-96 (C2-C7) — verify against captured log; octave-shift feature covers material outside this window",
+      "velocity": "fixed 100, not gradable — no dynamics nodes exist anywhere in this tree by design",
+      "channel": "all notes on ch 1; hands split by configurable splitPoint (default MIDI 60 / C4)",
+      "sustain": "permanently on at the instrument, invisible to MIDI; app plays its own dry sampled piano"
+    },
+    "latencyBandsMs": {
+      "automatic": 1200,
+      "known": 3000
+    },
+    "tracks": [
+      "keyboard-theory",
+      "physical-rhythm",
+      "ear"
+    ],
+    "fieldNotes": {
+      "dependsOn": "array of {id, why}. Unlock rule (see session-generator.md): child unlocks when every dep is at >=80% node mastery and all `requires` are satisfied.",
+      "masteryThreshold": "typed shapes, defined in architecture.md §7: deckFluency | timedRun | legato | articulation | sync | voiceLeading | earDeck | dictation | piece | pedalSync",
+      "sustainSensitive": "true = the skill concerns note SEPARATION, which the instrument's permanent sustain hides acoustically. Grading is MIDI-based and unaffected, but the drill MUST present/playback through the app's dry sampled piano so he can hear what the grader hears.",
+      "itemCount": "approximate count of distinct schedulable items the node generates; 'generated' = procedurally infinite, scheduled by difficulty tier",
+      "isV1": "exercisable by the three V1 drills (inversion trainer, chord-detection HUD, finger legato) and near the current frontier"
+    },
+    "v1Patch": {
+      "date": "2026-08-12",
+      "why": "Original V1 set was unreachable: every V1 node sat behind a non-V1 root gate, so the unlock rule left the day-one queue empty.",
+      "changes": [
+        "kt-geography isV1 -> true (root gate for all keyboard-theory V1 nodes; 12 items, calibration only)",
+        "pr-pulse-sync isV1 -> true (root gate for all physical V1 nodes; 4 items)",
+        "ear-intervals-1 isV1 -> true (ear track must start week one; root, no deps, 6 items)",
+        "pr-legato-scales isV1 -> false (depends on kt-scales-group1 / scale-run, out of V1 scope)",
+        "kt-geography.masteryThreshold.minRepsPerItem 2 -> 3 (was unsatisfiable against the last-3-reps mastery rule)"
+      ],
+      "v1DrillTypes": [
+        "inversion-trainer",
+        "legato-line",
+        "chord-hud",
+        "note-find",
+        "rhythm-tap",
+        "ear-id"
+      ],
+      "note": "kt-triads-root keeps drillType 'chord-play'; the inversion-trainer component handles it as inversion index 0. No separate grader."
+    }
+  },
+  "nodes": [
+    {
+      "id": "kt-geography",
+      "track": "keyboard-theory",
+      "name": "Keyboard geography",
+      "desc": "Find any named note in any octave without hunting. Calibration node — likely already near-mastered; expected to clear in one or two sessions and mostly exists to seed latency baselines.",
+      "dependsOn": [],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.98,
+        "automaticShare": 0.9,
+        "minRepsPerItem": 3
+      },
+      "drillType": "note-find",
+      "itemCount": 12,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "kt-triads-root",
+      "track": "keyboard-theory",
+      "name": "Root-position triads, all 12 keys",
+      "desc": "Major and minor triads from a name prompt, root position, any octave. He already KNOWS these — this node converts knowledge to latency: from derived-by-formula to automatic.",
+      "dependsOn": [
+        {
+          "id": "kt-geography",
+          "why": "chord latency is meaningless if part of it is spent hunting for the root note"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.95,
+        "automaticShare": 0.85,
+        "minRepsPerItem": 3
+      },
+      "drillType": "chord-play",
+      "itemCount": 24,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "kt-inv-maj-triads",
+      "track": "keyboard-theory",
+      "name": "Major triad inversions",
+      "desc": "Root, 1st, 2nd inversion of every major triad, prompted by symbol (e.g. 'Db/F'). The core V1 target: he can work these out in ~4s; goal is <1.2s.",
+      "dependsOn": [
+        {
+          "id": "kt-triads-root",
+          "why": "an inversion is a re-stacking of a shape that must itself already be automatic, or latency measures two skills at once"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.92,
+        "automaticShare": 0.85,
+        "minRepsPerItem": 3
+      },
+      "drillType": "inversion-trainer",
+      "itemCount": 36,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "kt-inv-min-triads",
+      "track": "keyboard-theory",
+      "name": "Minor triad inversions",
+      "desc": "Same mechanic as major inversions, minor qualities.",
+      "dependsOn": [
+        {
+          "id": "kt-inv-maj-triads",
+          "why": "staggered purely to limit simultaneous new-item load (36+36 at once floods the scheduler), not because minor is intrinsically harder — see orderingUncertainties[0]"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.92,
+        "automaticShare": 0.85,
+        "minRepsPerItem": 3
+      },
+      "drillType": "inversion-trainer",
+      "itemCount": 36,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "kt-scales-group1",
+      "track": "keyboard-theory",
+      "name": "Major scales: C G D A E",
+      "desc": "The five majors sharing the standard 123-1234 fingering. Hands separate, two octaves. Moves him from 'can derive any major scale' to 'has five memorised in the fingers'.",
+      "dependsOn": [
+        {
+          "id": "kt-geography",
+          "why": "scale fluency assumes instant note location; otherwise wrong-note errors are actually navigation errors"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 80,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "scale-run",
+      "itemCount": 10,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-scales-group2",
+      "track": "keyboard-theory",
+      "name": "Major scales: F Bb Eb Ab Db",
+      "desc": "Flat-key majors with non-standard thumb positions. Hands separate, two octaves.",
+      "dependsOn": [
+        {
+          "id": "kt-scales-group1",
+          "why": "establishes the practice mechanic and tempo habit on friendly fingerings before the flat keys break the thumb pattern"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 80,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "scale-run",
+      "itemCount": 10,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-scales-group3",
+      "track": "keyboard-theory",
+      "name": "Major scales: B and F#/Gb",
+      "desc": "The remaining majors. Completes all 12.",
+      "dependsOn": [
+        {
+          "id": "kt-scales-group2",
+          "why": "sequenced last only because they are rarest in his repertoire targets; mechanically they are easy (mostly black keys fit the hand)"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 80,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "scale-run",
+      "itemCount": 4,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-circle-of-fifths",
+      "track": "keyboard-theory",
+      "name": "Circle of fifths / key signatures",
+      "desc": "Key -> signature and signature -> key, both directions, all 12 majors, answered by playing (tonic + the sharps/flats) so recall stays attached to the keyboard.",
+      "dependsOn": [
+        {
+          "id": "kt-scales-group1",
+          "why": "signatures should abstract scales already under the fingers, so the map has sound and shape attached rather than being rote name-facts — see orderingUncertainties[1]"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 1.0,
+        "automaticShare": 0.9,
+        "minRepsPerItem": 3
+      },
+      "drillType": "theory-recall",
+      "itemCount": 24,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-minor-scales",
+      "track": "keyboard-theory",
+      "name": "Minor scales (natural + harmonic)",
+      "desc": "All 12 keys, both forms, hands separate. Melodic minor deferred to repertoire need.",
+      "dependsOn": [
+        {
+          "id": "kt-circle-of-fifths",
+          "why": "relative-minor derivation turns 24 signatures into 12 facts; without it every minor key is a fresh memorisation"
+        },
+        {
+          "id": "kt-scales-group2",
+          "why": "the scale-practice mechanic and thumb-under habit must already be routine so only the new note content is being learned"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 72,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 40,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "scale-run",
+      "itemCount": 48,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-diatonic-chords",
+      "track": "keyboard-theory",
+      "name": "Diatonic triads by Roman numeral",
+      "desc": "Prompted 'IV in A major' -> play the chord. The bridge from letter-name chord charts to functional harmony, and a prerequisite for everything ear-side.",
+      "dependsOn": [
+        {
+          "id": "kt-circle-of-fifths",
+          "why": "building the chord on a degree requires the key's notes to be instantly available"
+        },
+        {
+          "id": "kt-triads-root",
+          "why": "the chord shapes themselves must be automatic so only the numeral->root mapping is being trained"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.92,
+        "automaticShare": 0.8,
+        "minRepsPerItem": 3
+      },
+      "drillType": "chord-play",
+      "itemCount": 84,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-7ths-root",
+      "track": "keyboard-theory",
+      "name": "Seventh chords, root position",
+      "desc": "maj7, m7, dom7, m7b5 in all 12 keys.",
+      "dependsOn": [
+        {
+          "id": "kt-triads-root",
+          "why": "7ths are triads plus one interval; triad shapes must be automatic first or every 7th is built from scratch"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.92,
+        "automaticShare": 0.8,
+        "minRepsPerItem": 3
+      },
+      "drillType": "chord-play",
+      "itemCount": 48,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-dom7-inversions",
+      "track": "keyboard-theory",
+      "name": "Dominant 7th inversions",
+      "desc": "All four positions of every dom7. Dom7 first because it is the highest-frequency 7th in every genre he plays.",
+      "dependsOn": [
+        {
+          "id": "kt-7ths-root",
+          "why": "cannot invert a shape that is not yet automatic in root position"
+        },
+        {
+          "id": "kt-inv-min-triads",
+          "why": "the 3-note inversion mechanic (find the bass, re-stack above) must be reflexive before extending it to 4 notes"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.9,
+        "automaticShare": 0.8,
+        "minRepsPerItem": 3
+      },
+      "drillType": "inversion-trainer",
+      "itemCount": 48,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-7th-inversions",
+      "track": "keyboard-theory",
+      "name": "Remaining 7th inversions",
+      "desc": "maj7, m7, m7b5 in all inversions. Long-tail node; expected to be in rotation for months.",
+      "dependsOn": [
+        {
+          "id": "kt-dom7-inversions",
+          "why": "prove the 4-note inversion mechanic on the highest-value quality before paying for the long tail"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.9,
+        "automaticShare": 0.75,
+        "minRepsPerItem": 3
+      },
+      "drillType": "inversion-trainer",
+      "itemCount": 144,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-sus-add-ext",
+      "track": "keyboard-theory",
+      "name": "Sus, add and extended chords",
+      "desc": "sus2, sus4, 6, add9, 9 in all keys. Pop/chart vocabulary, feeds play-by-ear.",
+      "dependsOn": [
+        {
+          "id": "kt-7ths-root",
+          "why": "9ths are alterations of 7th shapes; sus/add sit naturally after the 4-note habit exists"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.9,
+        "automaticShare": 0.75,
+        "minRepsPerItem": 3
+      },
+      "drillType": "chord-play",
+      "itemCount": 60,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-shell-voicings",
+      "track": "keyboard-theory",
+      "name": "Shell voicings",
+      "desc": "R-3-7 and R-7-3 shells, LH root + RH guide tones. First voicing concept beyond close position; immediately usable in chart playing.",
+      "dependsOn": [
+        {
+          "id": "kt-7ths-root",
+          "why": "shells are subsets of 7th chords; the full shape must exist before parts of it are extracted"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.9,
+        "automaticShare": 0.75,
+        "minRepsPerItem": 3
+      },
+      "drillType": "chord-play",
+      "itemCount": 96,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-voice-leading",
+      "track": "keyboard-theory",
+      "name": "Voice leading between diatonic chords",
+      "desc": "Connect I-IV-V-I (and 3 other stock progressions) choosing inversions that minimise motion. Metric is fully MIDI-computable: pair upper voices by pitch order between consecutive chords, sum absolute semitone movement.",
+      "dependsOn": [
+        {
+          "id": "kt-inv-min-triads",
+          "why": "smooth connection IS choosing the right inversion under time pressure; inversions must be automatic or every change stalls"
+        },
+        {
+          "id": "kt-diatonic-chords",
+          "why": "the material is numeral-prompted progressions; the numeral->chord map must not consume attention"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "voiceLeading",
+        "progressions": 4,
+        "keys": 12,
+        "voiceMotionTotalMax": 8,
+        "maxUpperVoiceLeapSemitones": 4,
+        "changeLatencyMsMax": 2000,
+        "accuracy": 0.9
+      },
+      "drillType": "prog-play",
+      "itemCount": 48,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-numeral-progressions",
+      "track": "keyboard-theory",
+      "name": "Progressions from Roman numerals",
+      "desc": "Six stock progressions (I-V-vi-IV, ii-V-I, I-vi-IV-V, vi-IV-I-V, I-IV-V-I, I-bVII-IV-I) in all keys, voice-led, in time. The transposition engine behind play-by-ear.",
+      "dependsOn": [
+        {
+          "id": "kt-voice-leading",
+          "why": "in-time progression playing collapses without reflexive inversion choice; this node adds tempo pressure to an existing skill"
+        },
+        {
+          "id": "kt-diatonic-chords",
+          "why": "numeral vocabulary source"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "sync",
+        "tempoBpm": 80,
+        "chordAccuracy": 0.95,
+        "onsetWindowMs": 120,
+        "cleanPasses": 2,
+        "perKeyCoverage": 1.0
+      },
+      "drillType": "prog-play",
+      "itemCount": 72,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "kt-open-voicings",
+      "track": "keyboard-theory",
+      "name": "Open and spread voicings",
+      "desc": "Two-hand spread voicings (LH root+fifth or tenth, RH upper structure) within the 61-key window.",
+      "dependsOn": [
+        {
+          "id": "kt-shell-voicings",
+          "why": "open voicings extend the shell concept upward; shells supply the guide-tone skeleton"
+        },
+        {
+          "id": "kt-7th-inversions",
+          "why": "upper structures are inversions of the chord's top notes; choosing them must be automatic"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "deckFluency",
+        "accuracy": 0.88,
+        "automaticShare": 0.7,
+        "minRepsPerItem": 3
+      },
+      "drillType": "chord-play",
+      "itemCount": 48,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-pulse-sync",
+      "track": "physical-rhythm",
+      "name": "Pulse sync",
+      "desc": "Quarter notes on one key locked to the Transport click, 60-120 BPM. Baseline for every timing window in the app.",
+      "dependsOn": [],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 100,
+        "notesPerBeat": 1,
+        "noteAccuracy": 1.0,
+        "meanAbsErrMsMax": 35,
+        "timingSdMsMax": 30,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "rhythm-tap",
+      "itemCount": 4,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "pr-subdivisions",
+      "track": "physical-rhythm",
+      "name": "Subdivisions",
+      "desc": "Eighths, triplets, sixteenths on one note, and switching between them mid-stream on cue.",
+      "dependsOn": [
+        {
+          "id": "pr-pulse-sync",
+          "why": "subdivisions are divisions of a pulse he can already hold; without a stable quarter the reference disappears"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 80,
+        "notesPerBeat": 4,
+        "noteAccuracy": 1.0,
+        "meanAbsErrMsMax": 30,
+        "timingSdMsMax": 25,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "rhythm-tap",
+      "itemCount": 12,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-legato-5finger",
+      "track": "physical-rhythm",
+      "name": "Finger legato: five-finger positions",
+      "desc": "Stepwise five-finger patterns, each hand. Trains the release timing sustain has been hiding: note N's note-off must land 10-60ms AFTER note N+1's note-on. Stage progression in notes.",
+      "dependsOn": [
+        {
+          "id": "pr-pulse-sync",
+          "why": "overlap targets are only meaningful at a controlled steady tempo; rushing destroys the measurement"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "legato",
+        "tempoBpm": 72,
+        "notesPerBeat": 2,
+        "overlapBandMs": [
+          10,
+          60
+        ],
+        "inBandShare": 0.85,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "legato-line",
+      "itemCount": 12,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": true,
+      "notes": "Stages: (1) 60 BPM quarters, band [0,80], inBandShare 0.75 — awareness; (2) 72 BPM quarters, band [10,60], 0.8; (3) 72 BPM eighths, band [10,60], 0.85 = mastery. His captured log shows ~60ms overlaps, i.e. he starts at the smeared edge of the band. Always played/monitored on the dry app piano."
+    },
+    {
+      "id": "pr-legato-scales",
+      "track": "physical-rhythm",
+      "name": "Finger legato: scales (thumb-under)",
+      "desc": "Full-scale legato where the thumb crossing is the known failure point. Grader reports thumb-under transitions (fixed scale positions under standard fingering) separately from the rest.",
+      "dependsOn": [
+        {
+          "id": "pr-legato-5finger",
+          "why": "release timing must be controlled in a static hand position before adding hand relocation"
+        },
+        {
+          "id": "kt-scales-group1",
+          "why": "cannot train connection through material still being decoded note-by-note; the notes must already be automatic"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "legato",
+        "tempoBpm": 80,
+        "notesPerBeat": 2,
+        "overlapBandMs": [
+          10,
+          60
+        ],
+        "inBandShare": 0.85,
+        "thumbUnderInBandShare": 0.75,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "legato-line",
+      "itemCount": 24,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false,
+      "notes": "Assumes standard scale fingerings so thumb-under positions are inferable from note index. This assumption should be surfaced in the UI ('use standard fingering or the thumb metric lies')."
+    },
+    {
+      "id": "pr-articulation",
+      "track": "physical-rhythm",
+      "name": "Articulation control (staccato/detached)",
+      "desc": "Deliberate non-legato: note duration as a fraction of the inter-onset interval. Staccato target duty 0.3-0.5. Same release-timing muscle as legato, opposite direction.",
+      "dependsOn": [
+        {
+          "id": "pr-legato-5finger",
+          "why": "articulation is the same release-timing control; train the connected direction first since that is his stated gap"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "articulation",
+        "tempoBpm": 80,
+        "notesPerBeat": 2,
+        "dutyBand": [
+          0.3,
+          0.5
+        ],
+        "inBandShare": 0.85,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "legato-line",
+      "itemCount": 12,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-chart-sync",
+      "track": "physical-rhythm",
+      "name": "Chart playing, graded",
+      "desc": "His existing habit, instrumented: RH chords + LH root an octave lower, from a chart, to a click. The chord-detection HUD grades identity and change placement. Doubles as passive telemetry in free-play mode.",
+      "dependsOn": [
+        {
+          "id": "pr-pulse-sync",
+          "why": "change placement is graded against a grid; the grid must be holdable first"
+        },
+        {
+          "id": "kt-triads-root",
+          "why": "the chart vocabulary is the triads; they must be playable without derivation for the timing grade to mean anything"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "sync",
+        "tempoBpm": 84,
+        "chordAccuracy": 0.95,
+        "onsetWindowMs": 120,
+        "cleanPasses": 3,
+        "chartsRequired": 3
+      },
+      "drillType": "chord-hud",
+      "itemCount": 20,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "pr-lh-patterns",
+      "track": "physical-rhythm",
+      "name": "LH accompaniment patterns",
+      "desc": "LH root / root-fifth / root-fifth-octave in eighths under sustained RH chords. First real hand-independence step beyond the drone habit.",
+      "dependsOn": [
+        {
+          "id": "pr-chart-sync",
+          "why": "adds LH motion inside a two-hand frame that is already stable; changing both hands' jobs at once fails"
+        },
+        {
+          "id": "pr-subdivisions",
+          "why": "the LH patterns are eighth-note figures; the subdivision must exist before it is delegated to the weak hand"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "sync",
+        "tempoBpm": 80,
+        "chordAccuracy": 0.95,
+        "onsetWindowMs": 100,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3
+      },
+      "drillType": "pattern-sync",
+      "itemCount": 36,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-alberti",
+      "track": "physical-rhythm",
+      "name": "Alberti bass",
+      "desc": "LH low-high-mid-high figures under RH chords, then RH simple melody. The classical accompaniment gateway.",
+      "dependsOn": [
+        {
+          "id": "pr-lh-patterns",
+          "why": "Alberti is a harder LH figure in the same role; the role itself must already be automatic"
+        },
+        {
+          "id": "kt-inv-maj-triads",
+          "why": "Alberti figures outline triad inversions; if the shape is being computed the figure cannot flow"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "sync",
+        "tempoBpm": 76,
+        "chordAccuracy": 0.95,
+        "onsetWindowMs": 90,
+        "timingSdMsMax": 30,
+        "cleanPasses": 3
+      },
+      "drillType": "pattern-sync",
+      "itemCount": 24,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false,
+      "notes": "sustainSensitive because at speed, permanent sustain turns Alberti into wash; the dry app piano is the only honest monitor."
+    },
+    {
+      "id": "pr-rhythm-independence",
+      "track": "physical-rhythm",
+      "name": "Rhythmic hand independence",
+      "desc": "Different rhythms per hand on fixed pitches: quarters vs eighths, then syncopated RH over straight LH, then swapped.",
+      "dependsOn": [
+        {
+          "id": "pr-lh-patterns",
+          "why": "graduates from 'LH busy, RH static' to genuinely different simultaneous rhythms; the intermediate stage must be solid — see orderingUncertainties[3]"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 80,
+        "notesPerBeat": 2,
+        "noteAccuracy": 0.97,
+        "meanAbsErrMsMax": 35,
+        "timingSdMsMax": 30,
+        "cleanPasses": 3
+      },
+      "drillType": "pattern-sync",
+      "itemCount": 24,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-scales-ht",
+      "track": "physical-rhythm",
+      "name": "Hands-together scales",
+      "desc": "Parallel-motion scales, two octaves, both hands. Lives in the physical track because the new content is coordination, not notes.",
+      "dependsOn": [
+        {
+          "id": "pr-legato-scales",
+          "why": "each hand's legato scale must be independently automatic; hands-together exposes whichever hand still needs attention"
+        },
+        {
+          "id": "kt-scales-group1",
+          "why": "note material source; only fingered-and-memorised scales enter this node's item pool"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 72,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 35,
+        "handOnsetSkewMsMax": 30,
+        "cleanPasses": 3
+      },
+      "drillType": "scale-run",
+      "itemCount": 12,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false,
+      "notes": "handOnsetSkewMs = |RH onset - LH onset| for simultaneous pairs, hands split at splitPoint. Fully computable."
+    },
+    {
+      "id": "pr-arpeggios-1",
+      "track": "physical-rhythm",
+      "name": "Arpeggios: one octave",
+      "desc": "Major and minor triad arpeggios, one octave, each hand.",
+      "dependsOn": [
+        {
+          "id": "kt-inv-maj-triads",
+          "why": "arpeggio fingerings live on inversion shapes; a computed shape cannot be arpeggiated in time"
+        },
+        {
+          "id": "pr-legato-5finger",
+          "why": "arpeggios are legato lines with gaps between fingers; release control must precede the wider spacing"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 76,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "arp-run",
+      "itemCount": 24,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-arpeggios-2",
+      "track": "physical-rhythm",
+      "name": "Arpeggios: two octaves + dom7",
+      "desc": "Two-octave triad arps with thumb crossings, plus dom7 arpeggios.",
+      "dependsOn": [
+        {
+          "id": "pr-arpeggios-1",
+          "why": "adds the crossing to an existing pattern rather than introducing both at once"
+        },
+        {
+          "id": "pr-legato-scales",
+          "why": "the thumb-under move is the same one trained in scale legato, at wider intervals"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 84,
+        "notesPerBeat": 2,
+        "noteAccuracy": 1.0,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3,
+        "perHand": true
+      },
+      "drillType": "arp-run",
+      "itemCount": 36,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-polyrhythm",
+      "track": "physical-rhythm",
+      "name": "Polyrhythm: 3:2 and 4:3",
+      "desc": "Two hands, two grids. Graded per hand against its own expected grid — fully computable from onsets.",
+      "dependsOn": [
+        {
+          "id": "pr-rhythm-independence",
+          "why": "polyrhythm is rhythmic independence at the limit; incommensurate grids fail without solid commensurate ones"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "timedRun",
+        "tempoBpm": 60,
+        "notesPerBeat": 3,
+        "noteAccuracy": 1.0,
+        "meanAbsErrMsMax": 40,
+        "timingSdMsMax": 35,
+        "cleanPasses": 3
+      },
+      "drillType": "pattern-sync",
+      "itemCount": 6,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "pr-two-lines",
+      "track": "physical-rhythm",
+      "name": "Two independent lines",
+      "desc": "Two-voice counterpoint etudes (easiest Bach minuet tier). The full hand-independence goal: melody against melody.",
+      "dependsOn": [
+        {
+          "id": "pr-rhythm-independence",
+          "why": "independent lines require independent rhythms plus independent pitches; rhythm alone is the trainable half to secure first"
+        },
+        {
+          "id": "pr-scales-ht",
+          "why": "hands-together stepwise motion is the coordination substrate two-voice pieces are built from"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "piece",
+        "noteAccuracy": 0.97,
+        "tempoShareOfTarget": 0.85,
+        "cleanPasses": 2
+      },
+      "drillType": "piece-check",
+      "itemCount": 6,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "rep-tier1",
+      "track": "physical-rhythm",
+      "name": "Repertoire I",
+      "desc": "First real pieces, chosen to fit 61 keys and no pedal: e.g. Satie Gymnopedie-style texture, easy minuets, Yiruma-tier arrangements. Graded against a reference MIDI score.",
+      "dependsOn": [
+        {
+          "id": "pr-lh-patterns",
+          "why": "tier-1 pieces are melody-over-pattern textures; the texture must pre-exist so the piece is assembly, not invention"
+        },
+        {
+          "id": "pr-legato-scales",
+          "why": "the melodic lines demand real finger legato; without it the pieces only sound acceptable because sustain is lying"
+        },
+        {
+          "id": "kt-inv-min-triads",
+          "why": "tier-1 LH harmonies use inversions freely; slow inversion recall stalls every bar"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "piece",
+        "noteAccuracy": 0.97,
+        "tempoShareOfTarget": 0.85,
+        "cleanPasses": 2
+      },
+      "drillType": "piece-check",
+      "itemCount": 4,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false,
+      "notes": "See orderingUncertainties[5] — this may deserve to unlock EARLIER with relaxed thresholds, for motivation."
+    },
+    {
+      "id": "rep-tier2",
+      "track": "physical-rhythm",
+      "name": "Repertoire II",
+      "desc": "Bach minuets / Anna Magdalena book, easy sonatina movements. True two-voice playing at repertoire stakes.",
+      "dependsOn": [
+        {
+          "id": "rep-tier1",
+          "why": "performance habits (starting, recovering from slips, tempo discipline) transfer up from easier pieces"
+        },
+        {
+          "id": "pr-two-lines",
+          "why": "tier-2 is contrapuntal; the etude tier proves the coordination before a whole piece depends on it"
+        },
+        {
+          "id": "pr-arpeggios-1",
+          "why": "tier-2 figuration is arpeggio-based in both hands"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "piece",
+        "noteAccuracy": 0.97,
+        "tempoShareOfTarget": 0.9,
+        "cleanPasses": 2
+      },
+      "drillType": "piece-check",
+      "itemCount": 4,
+      "sustainSensitive": true,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "rep-tier3",
+      "track": "physical-rhythm",
+      "name": "Repertoire III (pedal era)",
+      "desc": "Early-Romantic tier where the sustain pedal is part of the text (easy Chopin prelude tier). Visible now, locked until a pedal exists.",
+      "dependsOn": [
+        {
+          "id": "rep-tier2",
+          "why": "technical floor"
+        },
+        {
+          "id": "pd-legato-pedal",
+          "why": "these pieces are unplayable honestly without measured pedal technique"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "piece",
+        "noteAccuracy": 0.96,
+        "tempoShareOfTarget": 0.9,
+        "cleanPasses": 2
+      },
+      "drillType": "piece-check",
+      "itemCount": 3,
+      "sustainSensitive": true,
+      "requires": [
+        "pedal"
+      ],
+      "isV1": false
+    },
+    {
+      "id": "pd-pedal-basics",
+      "track": "physical-rhythm",
+      "name": "Pedal basics",
+      "desc": "LOCKED until pedal purchase. Foot up/down on cue, in time; CC64 events graded against beat targets.",
+      "dependsOn": [
+        {
+          "id": "pr-pulse-sync",
+          "why": "pedal timing is graded against the same grid as note timing"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "pedalSync",
+        "tempoBpm": 72,
+        "cc64WindowMs": 80,
+        "accuracy": 0.9,
+        "cleanPasses": 3
+      },
+      "drillType": "pedal-sync",
+      "itemCount": 6,
+      "sustainSensitive": true,
+      "requires": [
+        "pedal"
+      ],
+      "isV1": false
+    },
+    {
+      "id": "pd-legato-pedal",
+      "track": "physical-rhythm",
+      "name": "Syncopated (legato) pedaling",
+      "desc": "LOCKED. Pedal lifts AS the new chord sounds and re-catches after: lift within 0-120ms after new-chord onset, re-depress within 200ms.",
+      "dependsOn": [
+        {
+          "id": "pd-pedal-basics",
+          "why": "the up-down reflex must exist before it is inverted against the hands"
+        },
+        {
+          "id": "kt-voice-leading",
+          "why": "pedal changes follow harmony changes; hearing/knowing where harmony changes is prerequisite"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "pedalSync",
+        "tempoBpm": 72,
+        "liftWindowMsAfterOnset": [
+          0,
+          120
+        ],
+        "redepressWithinMs": 200,
+        "cleanChangeShare": 0.9,
+        "cleanPasses": 3
+      },
+      "drillType": "pedal-sync",
+      "itemCount": 12,
+      "sustainSensitive": true,
+      "requires": [
+        "pedal"
+      ],
+      "isV1": false
+    },
+    {
+      "id": "pd-clean-textures",
+      "track": "physical-rhythm",
+      "name": "Pedal clarity in textures",
+      "desc": "LOCKED. Apply legato pedaling inside real textures (arpeggiated LH, melody RH) without harmonic smear.",
+      "dependsOn": [
+        {
+          "id": "pd-legato-pedal",
+          "why": "the isolated change must be reflexive before it runs underneath divided attention"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "pedalSync",
+        "tempoBpm": 76,
+        "liftWindowMsAfterOnset": [
+          0,
+          100
+        ],
+        "cleanChangeShare": 0.92,
+        "cleanPasses": 2
+      },
+      "drillType": "pedal-sync",
+      "itemCount": 8,
+      "sustainSensitive": true,
+      "requires": [
+        "pedal"
+      ],
+      "isV1": false
+    },
+    {
+      "id": "ear-intervals-1",
+      "track": "ear",
+      "name": "Core intervals, ascending",
+      "desc": "M2, m3, M3, P4, P5, P8 melodic ascending. Answer by playing the second note from a given first note. Starts week one.",
+      "dependsOn": [],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.9,
+        "windowItems": 40,
+        "medianResponseMsMax": 2500
+      },
+      "drillType": "ear-id",
+      "itemCount": 6,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": true
+    },
+    {
+      "id": "ear-intervals-2",
+      "track": "ear",
+      "name": "All intervals, both directions",
+      "desc": "All 12 within the octave, ascending and descending.",
+      "dependsOn": [
+        {
+          "id": "ear-intervals-1",
+          "why": "the core six anchor the rest as neighbours ('a bit wider than P4'); starting with all 24 classes produces guessing, not hearing"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.88,
+        "windowItems": 48,
+        "medianResponseMsMax": 2500
+      },
+      "drillType": "ear-id",
+      "itemCount": 24,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-intervals-3",
+      "track": "ear",
+      "name": "Harmonic intervals",
+      "desc": "Simultaneous intervals — the bridge to hearing chord interiors.",
+      "dependsOn": [
+        {
+          "id": "ear-intervals-2",
+          "why": "harmonic hearing decomposes into melodic hearing plus separation; melodic classes must be secure first"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.85,
+        "windowItems": 48,
+        "medianResponseMsMax": 3000
+      },
+      "drillType": "ear-id",
+      "itemCount": 12,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-triads",
+      "track": "ear",
+      "name": "Triad quality: major vs minor",
+      "desc": "Block and arpeggiated. Deliberately tiny so it clears fast and feeds progression hearing.",
+      "dependsOn": [
+        {
+          "id": "ear-intervals-1",
+          "why": "quality discrimination rides on hearing the third; m3/M3 must be distinguishable in isolation first"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.92,
+        "windowItems": 40,
+        "medianResponseMsMax": 2000
+      },
+      "drillType": "ear-id",
+      "itemCount": 4,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-triads-2",
+      "track": "ear",
+      "name": "Triad quality: dim, aug, sus",
+      "desc": "Remaining triad colours.",
+      "dependsOn": [
+        {
+          "id": "ear-triads",
+          "why": "maj/min is the axis everything else is heard against"
+        },
+        {
+          "id": "ear-intervals-2",
+          "why": "dim/aug identification hinges on tritone vs P5 vs m6 hearing"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.88,
+        "windowItems": 40,
+        "medianResponseMsMax": 2500
+      },
+      "drillType": "ear-id",
+      "itemCount": 5,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-7th-qualities",
+      "track": "ear",
+      "name": "Seventh chord qualities",
+      "desc": "maj7 / m7 / dom7 / m7b5 / dim7 by ear.",
+      "dependsOn": [
+        {
+          "id": "ear-triads-2",
+          "why": "a 7th is heard as triad colour plus top-interval colour; both components must pre-exist"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.85,
+        "windowItems": 40,
+        "medianResponseMsMax": 3000
+      },
+      "drillType": "ear-id",
+      "itemCount": 5,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-scale-degrees",
+      "track": "ear",
+      "name": "Scale-degree hearing (functional)",
+      "desc": "Tonic drone + cadence establishes the key; a note sounds; answer by playing it. Movable-do hearing — the single most important ear node for the play-by-ear goal.",
+      "dependsOn": [
+        {
+          "id": "ear-intervals-1",
+          "why": "needs stable pitch comparison, but degree hearing is functional rather than intervallic — this dep is deliberately minimal, see orderingUncertainties[2]"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.9,
+        "windowItems": 56,
+        "medianResponseMsMax": 2500
+      },
+      "drillType": "ear-id",
+      "itemCount": 7,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-melody-1",
+      "track": "ear",
+      "name": "Short melody playback",
+      "desc": "3-5 note diatonic fragments over an established key; hear, then reproduce on the keyboard. Pitch only — free rhythm.",
+      "dependsOn": [
+        {
+          "id": "ear-scale-degrees",
+          "why": "melody playback is degree hearing in sequence; single-degree ID must be reliable before chains of it"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "dictation",
+        "noteAccuracy": 0.9,
+        "maxListens": 2,
+        "windowItems": 30
+      },
+      "drillType": "dictation-playback",
+      "itemCount": "generated (5 difficulty tiers)",
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-melody-2",
+      "track": "ear",
+      "name": "Melody playback with rhythm",
+      "desc": "1-2 bar melodies, pitch and rhythm both graded.",
+      "dependsOn": [
+        {
+          "id": "ear-melody-1",
+          "why": "isolates the new variable: same pitch skill, rhythm added"
+        },
+        {
+          "id": "pr-subdivisions",
+          "why": "cannot reproduce a rhythm the hands cannot yet produce on demand; otherwise ear errors and motor errors are indistinguishable"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "dictation",
+        "noteAccuracy": 0.9,
+        "onsetWindowMs": 120,
+        "rhythmAccuracy": 0.85,
+        "maxListens": 3,
+        "windowItems": 24
+      },
+      "drillType": "dictation-playback",
+      "itemCount": "generated (6 difficulty tiers)",
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-bass-tracking",
+      "track": "ear",
+      "name": "Bass-line / root tracking",
+      "desc": "Hear a diatonic progression, play its bass line. The load-bearing skill for hearing chord changes in real songs.",
+      "dependsOn": [
+        {
+          "id": "ear-scale-degrees",
+          "why": "roots are heard as degrees of the key, not as absolute pitches"
+        },
+        {
+          "id": "kt-diatonic-chords",
+          "why": "mapping a heard root to 'that's the IV' presumes the degree->chord map already exists cold"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "dictation",
+        "noteAccuracy": 0.88,
+        "maxListens": 2,
+        "windowItems": 24
+      },
+      "drillType": "dictation-playback",
+      "itemCount": 8,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-progressions-1",
+      "track": "ear",
+      "name": "Progression ID: pop set",
+      "desc": "Identify 4-chord diatonic loops (I-V-vi-IV family) by numeral.",
+      "dependsOn": [
+        {
+          "id": "ear-bass-tracking",
+          "why": "progressions are recognised root-motion-first; quality colours it second"
+        },
+        {
+          "id": "ear-triads",
+          "why": "maj/min discrimination distinguishes vi from IV when root motion is ambiguous"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.85,
+        "windowItems": 32,
+        "medianResponseMsMax": 6000
+      },
+      "drillType": "ear-id",
+      "itemCount": 8,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-progressions-2",
+      "track": "ear",
+      "name": "Progression ID: full diatonic + secondary dominants",
+      "desc": "All diatonic functions plus V/x chords.",
+      "dependsOn": [
+        {
+          "id": "ear-progressions-1",
+          "why": "extends a working recognition process to rarer functions"
+        },
+        {
+          "id": "ear-7th-qualities",
+          "why": "secondary dominants are flagged by dom7 colour on a non-V degree"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "earDeck",
+        "accuracy": 0.82,
+        "windowItems": 32,
+        "medianResponseMsMax": 8000
+      },
+      "drillType": "ear-id",
+      "itemCount": 16,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-play-1",
+      "track": "ear",
+      "name": "Play by ear I: sections",
+      "desc": "Hear an 8-bar section of a simple real song; reproduce melody (RH) over block chords (LH) — his existing two-hand frame, sourced by ear instead of a chart. THE stated goal, first honest form.",
+      "dependsOn": [
+        {
+          "id": "ear-melody-2",
+          "why": "the melody half"
+        },
+        {
+          "id": "ear-progressions-1",
+          "why": "the harmony half"
+        },
+        {
+          "id": "pr-chart-sync",
+          "why": "assembly happens in the practiced two-hand frame so the only new work is the ear work"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "dictation",
+        "noteAccuracy": 0.9,
+        "chordAccuracy": 0.85,
+        "maxListens": 3,
+        "windowItems": 10
+      },
+      "drillType": "dictation-playback",
+      "itemCount": 10,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-play-2",
+      "track": "ear",
+      "name": "Play by ear II: full songs, real textures",
+      "desc": "Whole songs by ear with patterned LH (from pr-lh-patterns) instead of block chords.",
+      "dependsOn": [
+        {
+          "id": "ear-play-1",
+          "why": "scales section skill to song length"
+        },
+        {
+          "id": "pr-lh-patterns",
+          "why": "the target texture"
+        },
+        {
+          "id": "kt-numeral-progressions",
+          "why": "songs get re-keyed on the fly; numeral fluency is what makes the heard progression portable"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "dictation",
+        "noteAccuracy": 0.9,
+        "chordAccuracy": 0.85,
+        "maxListens": 5,
+        "windowItems": 6
+      },
+      "drillType": "dictation-playback",
+      "itemCount": 10,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    },
+    {
+      "id": "ear-transpose",
+      "track": "ear",
+      "name": "Transpose by ear",
+      "desc": "Take a song already learned by ear and play it in three other keys without a chart.",
+      "dependsOn": [
+        {
+          "id": "ear-play-1",
+          "why": "material source"
+        },
+        {
+          "id": "kt-circle-of-fifths",
+          "why": "the new key's signature must be instant or every bar re-derives it"
+        }
+      ],
+      "masteryThreshold": {
+        "type": "dictation",
+        "noteAccuracy": 0.88,
+        "chordAccuracy": 0.85,
+        "maxListens": 0,
+        "windowItems": 12
+      },
+      "drillType": "dictation-playback",
+      "itemCount": 30,
+      "sustainSensitive": false,
+      "requires": [],
+      "isV1": false
+    }
+  ],
+  "orderingUncertainties": [
+    {
+      "index": 0,
+      "about": [
+        "kt-inv-min-triads"
+      ],
+      "issue": "Sequenced after major inversions only to cap new-item load. If major inversions clear fast and he reports boredom, run them in parallel instead.",
+      "resolve": "If kt-inv-maj-triads reaches 50% mastery within a week, auto-unlock minor early."
+    },
+    {
+      "index": 1,
+      "about": [
+        "kt-circle-of-fifths"
+      ],
+      "issue": "Placed after the first scale group so signatures abstract lived scales. The opposite school: teach the circle first as the organising map. Both are defensible.",
+      "resolve": "If scale-group2/3 acquisition is slow, pull circle-of-fifths earlier — the map may be the missing scaffold."
+    },
+    {
+      "index": 2,
+      "about": [
+        "ear-scale-degrees"
+      ],
+      "issue": "Functional (degree) vs intervallic ear-training order is genuinely contested. Degree hearing may deserve to start week one alongside intervals-1 with NO dependency.",
+      "resolve": "If interval accuracy is high but ear-melody-1 stalls, degrees started too late — drop the dependency."
+    },
+    {
+      "index": 3,
+      "about": [
+        "pr-alberti",
+        "pr-rhythm-independence"
+      ],
+      "issue": "These could swap. Alberti-first trains a fixed figure (easier, less general); rhythm-independence-first is more general but more frustrating.",
+      "resolve": "Both depend only on pr-lh-patterns in ways that permit parallel unlock; let session data decide which he actually tolerates."
+    },
+    {
+      "index": 4,
+      "about": [
+        "kt-minor-scales"
+      ],
+      "issue": "Natural + harmonic introduced together doubles the deck. May be better to ship natural only and gate harmonic behind it.",
+      "resolve": "If the node's accuracy sits below 80% after two weeks in rotation, split it."
+    },
+    {
+      "index": 5,
+      "about": [
+        "rep-tier1"
+      ],
+      "issue": "Repertoire gated behind three technique nodes may arrive too late for motivation — and motivation is a first-class constraint for this user. A 'preview' unlock (relaxed thresholds, no mastery credit) at half the dependency mastery might be the right adherence move.",
+      "resolve": "If sessions/week drops below 4 before rep-tier1 unlocks, add the preview mode."
+    },
+    {
+      "index": 6,
+      "about": [
+        "pr-scales-ht",
+        "rep-tier1"
+      ],
+      "issue": "Hands-together scales do NOT gate rep-tier1 in this tree (tier-1 textures are pattern-based, not parallel-motion). If tier-1 pieces expose hands-sync problems, this edge is missing.",
+      "resolve": "Watch handOnsetSkew inside rep-tier1 grading; if consistently >40ms, add the edge."
+    }
+  ]
+}
