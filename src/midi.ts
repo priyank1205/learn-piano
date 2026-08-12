@@ -82,6 +82,140 @@ export function handOf(pitch: number, splitPoint: number): Hand {
   return pitch < splitPoint ? 'L' : 'R';
 }
 
+/** Running summary of one controller, per channel. */
+export interface CcProfileEntry {
+  num: number;
+  channel: number;
+  count: number;
+  min: number;
+  max: number;
+  last: number;
+  /** Distinct values seen, capped so a sweeping controller cannot grow unbounded. */
+  values: number[];
+  firstTs: number;
+  lastTs: number;
+}
+
+/**
+ * Standard MIDI controller names, for the CC breakdown panel. Only the ones a
+ * consumer keyboard plausibly emits; anything else is shown as its bare number.
+ */
+export const CC_NAMES: Record<number, string> = {
+  0: 'Bank Select MSB',
+  1: 'Modulation',
+  5: 'Portamento Time',
+  6: 'Data Entry MSB',
+  7: 'Channel Volume',
+  10: 'Pan',
+  11: 'Expression',
+  32: 'Bank Select LSB',
+  38: 'Data Entry LSB',
+  64: 'Sustain Pedal',
+  65: 'Portamento',
+  66: 'Sostenuto',
+  67: 'Soft Pedal',
+  71: 'Resonance',
+  74: 'Brightness',
+  84: 'Portamento Control',
+  91: 'Reverb Send',
+  93: 'Chorus Send',
+  98: 'NRPN LSB',
+  99: 'NRPN MSB',
+  100: 'RPN LSB',
+  101: 'RPN MSB',
+  120: 'All Sound Off',
+  121: 'Reset All Controllers',
+  122: 'Local Control',
+  123: 'All Notes Off',
+  124: 'Omni Off',
+  125: 'Omni On',
+  126: 'Mono Mode',
+  127: 'Poly Mode',
+};
+
+export const ccLabel = (num: number) => CC_NAMES[num] ?? `CC${num}`;
+
+/**
+ * Pure status-byte decoder. Kept separate from the ingest class so it can be
+ * unit tested without a MIDI device or a browser, since every timing number the
+ * app ever produces depends on this being right.
+ *
+ * Returns null for messages the app deliberately ignores.
+ */
+export function decodeMessage(
+  raw: number[],
+  timestamp: number | undefined,
+  ctx: { portId: string; seq: number; now: () => number }
+): NormalizedEvent | null {
+  if (raw.length < 1) return null;
+
+  const statusByte = raw[0] ?? 0;
+  // A data byte in status position means running status, which Web MIDI never
+  // delivers (it always hands over complete messages). Treat it as corrupt.
+  if (statusByte < 0x80) return null;
+  // System realtime (0xF8 clock, 0xFE active sensing) and sysex arrive constantly
+  // on some devices and would drown the log. Nothing downstream uses them.
+  if (statusByte >= 0xf0) return null;
+
+  const kind = statusByte & 0xf0;
+  const channel = (statusByte & 0x0f) + 1;
+  const d1 = raw[1] ?? 0;
+  const d2 = raw[2] ?? 0;
+
+  // A timestamp of 0 is what a driver reports when it has no clock of its own.
+  // Substituting performance.now() keeps the stream usable but makes every
+  // timing score suspect, so the substitution is flagged rather than hidden.
+  const hasTs = typeof timestamp === 'number' && timestamp > 0;
+  const ts = hasTs ? timestamp : ctx.now();
+  const synthetic = hasTs ? {} : { tsSynthetic: true as const };
+
+  const base = { ts, channel, statusByte, raw, portId: ctx.portId, seq: ctx.seq };
+
+  if (kind === 0x90 && d2 > 0) {
+    return { ...base, type: 'on', pitch: d1, velocity: d2, ...synthetic };
+  }
+
+  // True note-off. This is the path the Casio actually uses.
+  if (kind === 0x80) {
+    return {
+      ...base,
+      type: 'off',
+      pitch: d1,
+      velocity: 0,
+      releaseVelocity: d2,
+      offSource: 'status-128',
+      ...synthetic,
+    };
+  }
+
+  // Defensive fallback: note-on with velocity 0 means note-off on some devices.
+  // Not expected from this instrument; tagged so the inspector proves it.
+  if (kind === 0x90 && d2 === 0) {
+    return {
+      ...base,
+      type: 'off',
+      pitch: d1,
+      velocity: 0,
+      offSource: 'velocity-0',
+      ...synthetic,
+    };
+  }
+
+  if (kind === 0xb0) {
+    return {
+      ...base,
+      type: 'cc',
+      pitch: -1,
+      velocity: 0,
+      cc: { num: d1, val: d2 },
+      ...synthetic,
+    };
+  }
+
+  // Pitch bend, aftertouch and program change are deliberately dropped.
+  return null;
+}
+
 class MidiIngest {
   status: IngestStatus = 'idle';
   error: string | null = null;
@@ -98,6 +232,8 @@ class MidiIngest {
   readonly velocitiesSeen = new Set<number>();
   /** Counts by note-off provenance, shown in the inspector. */
   readonly counts = { on: 0, offStatus128: 0, offVelocity0: 0, cc: 0 };
+  /** Per-controller summary, keyed `${channel}:${num}`. */
+  readonly ccProfile = new Map<string, CcProfileEntry>();
 
   subscribe(fn: (e: NormalizedEvent) => void): () => void {
     this.eventSubs.add(fn);
@@ -168,7 +304,7 @@ class MidiIngest {
 
   /**
    * Decode one raw MIDI message. `e` is webmidi.js's MessageEvent; we read the
-   * raw bytes off it and branch on the status byte ourselves.
+   * raw bytes off it and hand them to the pure decoder.
    */
   private onRawMessage(e: unknown, portId: string) {
     const evt = e as {
@@ -178,84 +314,58 @@ class MidiIngest {
       timestamp?: number;
     };
     const bytes = evt.message?.data ?? evt.data ?? evt.message?.rawData ?? evt.rawData;
-    if (!bytes || bytes.length < 1) return;
+    if (!bytes) return;
 
-    const raw = Array.from(bytes);
-    const statusByte = raw[0] ?? 0;
-    // System realtime (0xF8 clock, 0xFE active sensing) arrive constantly on some
-    // devices and would drown the log. Nothing downstream uses them.
-    if (statusByte >= 0xf0) return;
+    const event = decodeMessage(Array.from(bytes), evt.timestamp, {
+      portId,
+      seq: this.seq,
+      now: () => performance.now(),
+    });
+    if (!event) return;
 
-    const kind = statusByte & 0xf0;
-    const channel = (statusByte & 0x0f) + 1;
-    const d1 = raw[1] ?? 0;
-    const d2 = raw[2] ?? 0;
-
-    let ts = typeof evt.timestamp === 'number' ? evt.timestamp : 0;
-    let tsSynthetic = false;
-    if (!ts) {
-      ts = performance.now();
-      tsSynthetic = true;
-    }
-
-    const base = { ts, channel, statusByte, raw, portId, seq: this.seq++ };
-
-    if (kind === 0x90 && d2 > 0) {
-      this.velocitiesSeen.add(d2);
+    this.seq += 1;
+    if (event.type === 'on') {
+      this.velocitiesSeen.add(event.velocity);
       this.counts.on += 1;
-      this.emit({
-        ...base,
-        type: 'on',
-        pitch: d1,
-        velocity: d2,
-        ...(tsSynthetic && { tsSynthetic }),
-      });
-      return;
-    }
-
-    // True note-off. This is the path the Casio actually uses.
-    if (kind === 0x80) {
-      this.counts.offStatus128 += 1;
-      this.emit({
-        ...base,
-        type: 'off',
-        pitch: d1,
-        velocity: 0,
-        releaseVelocity: d2,
-        offSource: 'status-128',
-        ...(tsSynthetic && { tsSynthetic }),
-      });
-      return;
-    }
-
-    // Defensive fallback: note-on with velocity 0 means note-off on some devices.
-    // Not expected from this instrument; tagged so the inspector proves it.
-    if (kind === 0x90 && d2 === 0) {
-      this.counts.offVelocity0 += 1;
-      this.emit({
-        ...base,
-        type: 'off',
-        pitch: d1,
-        velocity: 0,
-        offSource: 'velocity-0',
-        ...(tsSynthetic && { tsSynthetic }),
-      });
-      return;
-    }
-
-    if (kind === 0xb0) {
+    } else if (event.type === 'off') {
+      if (event.offSource === 'velocity-0') this.counts.offVelocity0 += 1;
+      else this.counts.offStatus128 += 1;
+    } else if (event.type === 'cc' && event.cc) {
       this.counts.cc += 1;
-      this.emit({
-        ...base,
-        type: 'cc',
-        pitch: -1,
-        velocity: 0,
-        cc: { num: d1, val: d2 },
-        ...(tsSynthetic && { tsSynthetic }),
-      });
+      this.profileCc(event.cc.num, event.cc.val, event.channel, event.ts);
+    }
+    this.emit(event);
+  }
+
+  /**
+   * Running per-controller summary. Aggregated here rather than derived from the
+   * log, so a power-on burst is still visible after the ring buffer has rolled.
+   */
+  private profileCc(num: number, val: number, channel: number, ts: number) {
+    const key = `${channel}:${num}`;
+    const existing = this.ccProfile.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.min = Math.min(existing.min, val);
+      existing.max = Math.max(existing.max, val);
+      existing.last = val;
+      existing.lastTs = ts;
+      if (!existing.values.includes(val) && existing.values.length < 12) {
+        existing.values.push(val);
+      }
       return;
     }
-    // Everything else (pitch bend, aftertouch, program change) is deliberately dropped.
+    this.ccProfile.set(key, {
+      num,
+      channel,
+      count: 1,
+      min: val,
+      max: val,
+      last: val,
+      values: [val],
+      firstTs: ts,
+      lastTs: ts,
+    });
   }
 
   private emit(event: NormalizedEvent) {
@@ -273,11 +383,32 @@ class MidiIngest {
   clear() {
     this.events = [];
     this.velocitiesSeen.clear();
+    this.ccProfile.clear();
     this.counts.on = 0;
     this.counts.offStatus128 = 0;
     this.counts.offVelocity0 = 0;
     this.counts.cc = 0;
     this.bumpState();
+  }
+
+  /** Plain-text CC summary, so a finding can be pasted somewhere useful. */
+  ccReport(): string {
+    const rows = [...this.ccProfile.values()].sort(
+      (a, b) => a.channel - b.channel || a.num - b.num
+    );
+    if (rows.length === 0) return 'No control change messages received.';
+    const total = rows.reduce((sum, r) => sum + r.count, 0);
+    const t0 = Math.min(...rows.map((r) => r.firstTs));
+    const lines = rows.map(
+      (r) =>
+        `CC${String(r.num).padStart(3)} ch${r.channel}  n=${String(r.count).padStart(4)}  ` +
+        `values=[${r.values.join(', ')}]  last=${r.last}  ` +
+        `window=${(r.firstTs - t0).toFixed(0)}..${(r.lastTs - t0).toFixed(0)}ms  ` +
+        `${ccLabel(r.num)}`
+    );
+    return [`${total} CC messages across ${rows.length} controllers:`, ...lines].join(
+      '\n'
+    );
   }
 }
 
