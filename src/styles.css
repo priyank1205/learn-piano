@@ -596,3 +596,259 @@ button:hover {
   padding: 1.25rem;
   color: var(--dim);
 }
+
+/* Grader bench */
+
+.prompt-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 1.4rem 1.25rem;
+  text-align: center;
+}
+
+.prompt-card.idle {
+  padding: 2rem 1.25rem;
+}
+
+.prompt-card .muted {
+  margin: 0;
+}
+
+/* Big enough to read from the bench without leaning in. The prompt is the
+   only thing on this screen the user looks at while playing. */
+.prompt-symbol {
+  font-family: var(--mono);
+  font-size: 3.4rem;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.prompt-sub {
+  color: var(--dim);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.prompt-state {
+  margin-top: 0.7rem;
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  min-height: 1.2em;
+}
+
+.prompt-state .ok {
+  color: var(--ok);
+}
+
+.prompt-state .bad {
+  color: var(--bad);
+}
+
+.settling {
+  color: var(--warn);
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  background: var(--panel-2);
+}
+
+.h2-ok,
+.h2-bad {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--mono);
+}
+
+.h2-ok {
+  color: var(--ok);
+}
+
+.h2-bad {
+  color: var(--bad);
+}
+
+.band {
+  margin-left: 0.5rem;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  vertical-align: middle;
+}
+
+.band.automatic {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.band.known {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.band.not-known {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.errors {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+
+.errors strong {
+  font-family: var(--mono);
+  color: var(--fg);
+}
+
+.errors li {
+  color: var(--dim);
+}
+
+.rep-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+}
+
+.rep-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rep-list .tick.ok {
+  color: var(--ok);
+}
+
+.rep-list .tick.bad {
+  color: var(--bad);
+}
+
+.rep-item {
+  font-family: var(--mono);
+  min-width: 5rem;
+}
+
+.rep-list .band {
+  margin-left: auto;
+  font-family: var(--mono);
+}
+
+/* Inversion trainer */
+
+.trainer .prompt-card {
+  padding: 2.2rem 1.25rem;
+  /* The card changes colour on a grade, so it must not also change size:
+     a prompt that jumps when it is answered is a prompt you stop trusting. */
+  transition: border-color 120ms ease;
+}
+
+.trainer .prompt-card.ok {
+  border-color: var(--ok);
+}
+
+.trainer .prompt-card.bad {
+  border-color: var(--bad);
+}
+
+/* Bigger than the bench's. This is the only thing being looked at while
+   playing, and it is being read at a keyboard, not at a desk. */
+.trainer .prompt-symbol {
+  font-size: 5rem;
+}
+
+.trainer .prompt-state {
+  font-size: 0.95rem;
+  margin-top: 1rem;
+}
+
+.deck-picker {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+button.deck {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+}
+
+button.deck.active {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.deck-name {
+  font-weight: 500;
+}
+
+.deck-count {
+  font-size: 0.7rem;
+  color: var(--dim);
+  font-family: var(--mono);
+}
+
+.miss-card {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--bad);
+  border-radius: 7px;
+  padding: 0.8rem 1.1rem;
+}
+
+.miss-card .errors {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.miss-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.miss-actions kbd {
+  margin-left: 0.4rem;
+}
+
+.cc-table td.miss {
+  color: var(--bad);
+}
+
+.band-text.automatic {
+  color: var(--ok);
+}
+
+.band-text.known {
+  color: var(--warn);
+}
+
+.band-text.not-known {
+  color: var(--bad);
+}

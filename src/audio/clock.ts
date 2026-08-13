@@ -31,6 +31,7 @@
  * grading against a Transport grid.
  */
 
+import { median } from '../stats.ts';
 import { yieldToEventLoop } from './yield.ts';
 
 /** One correlated reading of both clocks. */
@@ -98,13 +99,6 @@ export function midiTsToContextTime(ts: number, offsetMs: number): number {
 /** Place an audio-timeline instant on the MIDI timeline. */
 export function contextTimeToMidiTs(contextTime: number, offsetMs: number): number {
   return contextTime * 1000 + offsetMs;
-}
-
-export function median(values: readonly number[]): number {
-  if (values.length === 0) return NaN;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
 /**

@@ -14,12 +14,12 @@ import {
   driftMs,
   fallbackOffsetMs,
   isUsablePair,
-  median,
   midiTsToContextTime,
   offsetMsFromPair,
   readOffsetMs,
 } from './clock.ts';
 import type { ClockSource } from './clock.ts';
+import { median } from '../stats.ts';
 
 const noYield = () => Promise.resolve();
 

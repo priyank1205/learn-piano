@@ -4,8 +4,9 @@
     {
       "name": "learn-piano",
       "runtimeExecutable": "/Users/priyank/.nvm/versions/node/v22.13.0/bin/node",
-      "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5173"],
-      "port": 5173
+      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

@@ -6,10 +6,14 @@
 import { useEffect, useState } from 'react';
 import Inspector from './Inspector.tsx';
 import AudioScreen from './Audio.tsx';
+import GraderScreen from './Grader.tsx';
+import TrainerScreen from './Trainer.tsx';
 import { audio, session, useAudioSession } from './audio/index.ts';
 
 const ROUTES = [
   { path: '/', label: 'Home' },
+  { path: '/train', label: 'Inversion trainer' },
+  { path: '/grader', label: 'Grader bench' },
   { path: '/audio', label: 'Audio out' },
   { path: '/inspector', label: 'MIDI inspector' },
 ] as const;
@@ -59,30 +63,36 @@ function AudioControl() {
 function Home() {
   return (
     <div className="home">
-      <h2>Slice 2: audio out and the clock offset</h2>
+      <h2>Slice 4: the drill schema and the inversion trainer</h2>
       <p>
-        The <a href="#/audio">audio screen</a> starts the sampled piano and calibrates the
-        offset between the MIDI clock and the audio clock. Turn the keyboard&apos;s own
-        volume down: the app is the sound source now.
+        The <a href="#/train">inversion trainer</a> is the first screen here that is for
+        practising rather than for proving something works. Pick a deck, press space, and
+        it prompts triads by symbol until you stop: a correct answer advances by itself, a
+        miss shows the notes and comes back later in the same session. Latency is the
+        score. Correctness only decides whether the latency counts.
       </p>
       <p>
-        MIDI event timestamps and <code>AudioContext.currentTime</code> have different
-        origins, so they are bridged through <code>getOutputTimestamp()</code> once at
-        startup rather than subtracted. That number is on screen next to a key-to-speaker
-        latency derived from it, because a wrong offset is silent: it would put a constant
-        error into every timing score in slice 3 and look fine.
+        Drills are data. The trainer contains no chords: it renders whatever the{' '}
+        <code>DrillTemplate</code> hands it, and the 72 items are the cartesian product of
+        that template&apos;s param space, each with a stable hashed id so the store slice
+        can key spaced repetition on it. A second drill is a second template, not an edit
+        to this screen.
       </p>
       <p>
-        Playback has a <strong>dry</strong> and a <strong>sustained</strong> mode. The
-        keyboard&apos;s sustain is permanently on, local to its own sound engine, and
-        sends nothing over MIDI, so dry mode is the only way to hear note separation the
-        way the legato grader measures it.
+        The <a href="#/grader">grader bench</a> is still the place to watch one rep being
+        decided, with the chord window and the settle window exposed. It now builds its
+        prompts from the same template the trainer runs, so the two cannot disagree about
+        what a chord is.
       </p>
       <p>
-        The <a href="#/inspector">MIDI inspector</a> stays as the debug route: raw bytes,
-        the three hardware assertions, and the control change breakdown.
+        The <a href="#/audio">audio screen</a> owns the piano and the clock offset, and
+        the <a href="#/inspector">MIDI inspector</a> is still the ground truth when a
+        grade looks wrong.
       </p>
-      <p className="muted">The grader and the three V1 drills land in later slices.</p>
+      <p className="muted">
+        Nothing is saved yet. Spaced repetition, mastery and sessions per week arrive with
+        the store slice.
+      </p>
     </div>
   );
 }
@@ -112,6 +122,10 @@ export default function App() {
           <Inspector />
         ) : route === '/audio' ? (
           <AudioScreen />
+        ) : route === '/grader' ? (
+          <GraderScreen />
+        ) : route === '/train' ? (
+          <TrainerScreen />
         ) : (
           <Home />
         )}

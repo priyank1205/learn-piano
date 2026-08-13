@@ -16,9 +16,9 @@
  */
 
 import * as Tone from 'tone';
-import { Midi } from 'tonal';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { midi } from '../midi.ts';
+import { noteNameOf } from '../theory.ts';
 import { AudioOut } from './engine.ts';
 import type { PianoVoice, SustainMode } from './engine.ts';
 import { buildSampleBank } from './piano.ts';
@@ -33,13 +33,12 @@ export const DEFAULT_VOLUME_DB = -6;
 export const MIN_VOLUME_DB = -40;
 export const MAX_VOLUME_DB = 6;
 
-/** Sharps rather than flats: unambiguous to parse, and only ever shown in debug UI. */
-const NOTE_NAMES: readonly string[] = Array.from(
-  { length: 128 },
-  (_, pitch) => Midi.midiToNoteName(pitch, { sharps: true }) || `midi${pitch}`
-);
-
-export const noteNameOf = (pitch: number): string => NOTE_NAMES[pitch] ?? `midi${pitch}`;
+/**
+ * The sampler keys its buffers by note name, and theory.ts owns note naming.
+ * Re-exported because this module is what the audio screens already import.
+ * Sharps, deliberately: the sample bank's keys have to be one stable spelling.
+ */
+export { noteNameOf };
 
 /**
  * Module-level so the AudioOut singleton can read the clock without the
@@ -234,12 +233,26 @@ class AudioSession {
     this.bump();
   }
 
-  /** A C major arpeggio, for checking the speakers without touching the keyboard. */
-  testChord(): void {
+  /**
+   * Sound a set of pitches. Used by the speaker check and by the grader bench's
+   * "hear it" button, which plays the chord the prompt is asking for.
+   *
+   * Not part of the grading path: a drill may play a prompt, but nothing the
+   * app sounds is ever fed back into the event stream, so this cannot influence
+   * a grade.
+   */
+  play(pitches: readonly number[], seconds = 1.6): void {
     if (!this.sampler) return;
     void context?.resume();
-    const notes = [60, 64, 67, 72].map(noteNameOf);
-    this.sampler.triggerAttackRelease(notes, 1.6);
+    this.sampler.triggerAttackRelease(
+      pitches.map((p) => noteNameOf(p)),
+      seconds
+    );
+  }
+
+  /** A C major arpeggio, for checking the speakers without touching the keyboard. */
+  testChord(): void {
+    this.play([60, 64, 67, 72]);
   }
 
   panic(): void {
@@ -261,6 +274,12 @@ export function useAudioSession(): AudioSession {
  * Driven by requestAnimationFrame rather than setInterval: nothing here is
  * musical, but the app has exactly one timing discipline and it is easier to
  * keep than to remember the exception.
+ *
+ * Returns the frame timestamp of the last repaint, which shares an origin with
+ * `performance.now()` and with every MIDI event timestamp. Callers that need to
+ * show a countdown read it from here rather than calling the clock while
+ * rendering, which React rejects as impure and which would make the same render
+ * produce a different number each time. 0 means no frame has run yet.
  */
 export function useAudioTick(active: boolean, periodMs = 200): number {
   const [tick, setTick] = useState(0);
@@ -273,7 +292,7 @@ export function useAudioTick(active: boolean, periodMs = 200): number {
       frame = requestAnimationFrame(loop);
       if (now - last < periodMs) return;
       last = now;
-      setTick((t) => t + 1);
+      setTick(now);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
