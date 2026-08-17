@@ -43,7 +43,16 @@ import {
 } from './types.ts';
 import { adherenceReport, dayStart, nextReturnMode } from './weeks.ts';
 import type { AdherenceReport } from './weeks.ts';
-import { applyRating, newItemState, ratingFor, revive } from '../schedule/srs.ts';
+import {
+  applyRating,
+  newItemState,
+  ratingFor,
+  ratingForPass,
+  revive,
+} from '../schedule/srs.ts';
+// Straight from the module rather than through `grade/index.ts`: the barrel
+// exports the runner, and the store has no business importing React.
+import { isClean } from '../grade/match.ts';
 import type { DrillItem } from '../drills/types.ts';
 import { itemById } from '../drills/registry.ts';
 import type { Rep } from '../grade/index.ts';
@@ -312,7 +321,13 @@ class ProgressStore {
     const sessionId = session?.id ?? 'orphan';
     const { correct, latencyMs } = rep.result;
 
-    const rating = ratingFor(correct, latencyMs, this.settings.latencyBandsMs);
+    // "tempoBpm present => timed grading" (architecture.md section 2), and a
+    // timed rep is rated by section 2's pass rules rather than by a latency band
+    // it does not have.
+    const rating =
+      rep.spec.expected.tempoBpm === undefined
+        ? ratingFor(correct, latencyMs, this.settings.latencyBandsMs)
+        : ratingForPass({ correct, notesClean: isClean(rep.result.noteErrors) });
 
     const row: RepRow = {
       id: repKey(sessionId, this.seq),

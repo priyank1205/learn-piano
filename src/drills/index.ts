@@ -14,6 +14,19 @@ export * from './registry.ts';
 export { canonicalParams, itemIdOf, stableHash } from './hash.ts';
 export { INVERSION_TRAINER_ID, inversionTrainer } from './inversionTrainer.ts';
 export type { InversionParams } from './inversionTrainer.ts';
+export { NOTE_FIND_ID, noteFind, keyLabel } from './noteFind.ts';
+export type { NoteFindParams } from './noteFind.ts';
+export {
+  RHYTHM_TAP_ID,
+  rhythmTap,
+  HAND_PITCH,
+  PULSE_BEATS,
+  PULSE_COUNT_IN,
+} from './rhythmTap.ts';
+export type { RhythmTapParams } from './rhythmTap.ts';
+export { EAR_ID, earId, CORE_INTERVALS, ROOT_RANGE, earPitches } from './earId.ts';
+export type { EarIntervalParams } from './earId.ts';
+export { prepareItem, presentItem, stopPresentation } from './present.ts';
 export {
   DEFAULT_DECK,
   DEFAULT_DWELL_MS,

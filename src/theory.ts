@@ -17,7 +17,7 @@
  *     feeds, and nothing in `grade/` imports it.
  */
 
-import { Chord, Midi, Note } from 'tonal';
+import { Chord, Interval, Midi, Note } from 'tonal';
 
 /** The two triad qualities V1 needs (skill-tree: kt-triads-root, kt-inv-*-triads). */
 export type TriadQuality = 'maj' | 'min';
@@ -191,6 +191,46 @@ export function triadPitches(
 ): number[] {
   return voicePitches(triadNoteNames(root, quality, inversion), lowestPitch);
 }
+
+/**
+ * How far an interval reaches, in semitones, from tonal.
+ *
+ * `Interval.semitones('m3')` is the whole of the arithmetic and CLAUDE.md is
+ * explicit that it stays that way ("no hand-rolled interval, chord, or scale
+ * math"). What this wrapper adds is a hard failure: tonal returns undefined for
+ * a name it cannot parse, and an undefined leaking into a pitch calculation
+ * would become NaN and grade every answer wrong with no error anywhere.
+ */
+export function intervalSemitones(name: string): number {
+  const semitones = Interval.semitones(name);
+  if (semitones === undefined || Number.isNaN(semitones)) {
+    throw new RangeError(`Unknown interval: ${name}`);
+  }
+  return semitones;
+}
+
+/**
+ * How an interval is said out loud. Names, not maths: tonal knows that `M3` is
+ * four semitones, and has no opinion about whether a prompt should read "M3" or
+ * "major 3rd". The drill shows both, because the shorthand is what a chart uses
+ * and the long form is what the ear learns under.
+ */
+export const INTERVAL_NAMES: Record<string, string> = {
+  m2: 'minor 2nd',
+  M2: 'major 2nd',
+  m3: 'minor 3rd',
+  M3: 'major 3rd',
+  P4: 'perfect 4th',
+  A4: 'tritone',
+  P5: 'perfect 5th',
+  m6: 'minor 6th',
+  M6: 'major 6th',
+  m7: 'minor 7th',
+  M7: 'major 7th',
+  P8: 'octave',
+};
+
+export const intervalName = (name: string): string => INTERVAL_NAMES[name] ?? name;
 
 /**
  * DISPLAY ONLY (architecture.md section 2). Names whatever is sounding, slash

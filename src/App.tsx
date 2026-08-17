@@ -14,7 +14,7 @@ import { store } from './store/index.ts';
 
 const ROUTES = [
   { path: '/', label: 'Home' },
-  { path: '/train', label: 'Inversion trainer' },
+  { path: '/train', label: 'Train' },
   { path: '/progress', label: 'Progress' },
   { path: '/grader', label: 'Grader bench' },
   { path: '/audio', label: 'Audio out' },
@@ -66,21 +66,29 @@ function AudioControl() {
 function Home() {
   return (
     <div className="home">
-      <h2>Slice 5: the progress store and the scheduler</h2>
+      <h2>Slice 6: the seeding drills</h2>
       <p>
-        Practice now outlives the page. Every rep goes to IndexedDB, spaced repetition
-        runs on it, and <a href="#/progress">progress</a> counts{' '}
-        <strong>sessions per week</strong>, which is the only number that matters for the
-        next fortnight: five or more says the design is holding, three or fewer says make
-        the sessions shorter rather than tune anything.
+        All three tracks have something to practise now. <strong>Note find</strong> is the
+        keyboard-geography deck the whole theory track sits behind,{' '}
+        <strong>pulse sync</strong> is quarter notes against the Transport click, and{' '}
+        <strong>interval ear training</strong> plays two notes and asks for the second
+        one. With the triads that makes four drills, and <a href="#/train">a session</a>{' '}
+        now moves between them.
       </p>
       <p>
-        <a href="#/train">Today&apos;s session</a> is the scheduler doing the choosing.
-        Correctness gates and latency grades, so an answer under 1.2 seconds pushes the
-        item further out than a correct answer at four seconds does. Order is
-        softmax-sampled rather than sorted, missed items come back after three to six
-        others, and a gap of a few days makes the next session smaller instead of
-        presenting a wall. Free practice is still there for hammering one deck by hand.
+        Today&apos;s session is the scheduler doing the choosing. Correctness gates and
+        latency grades, so an answer under 1.2 seconds pushes the item further out than a
+        correct answer at four seconds does. The pulse drill is the exception and is
+        judged on where the notes landed instead. Order is softmax-sampled rather than
+        sorted, missed items come back after three to six others, and a gap of a few days
+        makes the next session smaller instead of presenting a wall. Free practice is
+        still there for hammering one deck by hand.
+      </p>
+      <p>
+        <a href="#/progress">Progress</a> counts <strong>sessions per week</strong>, which
+        is the only number that matters for the next fortnight: five or more says the
+        design is holding, three or fewer says make the sessions shorter rather than tune
+        anything.
       </p>
       <p>
         The <a href="#/grader">grader bench</a> is the place to watch one rep being

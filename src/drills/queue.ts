@@ -20,10 +20,7 @@
  * again for twenty minutes is how a miss becomes a habit.
  */
 
-import type { DrillItem } from './types.ts';
-
-/** Injectable so the tests are deterministic. Returns [0, 1). */
-export type Rng = () => number;
+import type { DrillItem, Rng } from './types.ts';
 
 export interface QueueOptions {
   rng?: Rng;

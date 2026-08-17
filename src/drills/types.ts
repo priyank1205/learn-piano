@@ -22,6 +22,22 @@
  * **`view` exists.** architecture.md names a PromptRenderer and gives templates
  * a `promptMode`, but a mode alone cannot render anything. The template owns the
  * string on screen, or every new drill edits the trainer.
+ *
+ * **`prepare` exists.** Slice 6's addition, and the deviation with the most
+ * consequences, so it is worth stating plainly: **not everything that varies
+ * between two reps of the same item is part of the item.** The tree declares six
+ * items for `ear-intervals-1`, one per interval, while the drill plays each
+ * interval from a different starting note every time, and architecture.md
+ * section 9.5 depends on it doing so (it asks whether ear accuracy is worse in
+ * Db than in C, which is unanswerable if every rep starts on the same note).
+ * Six items and twelve starting notes cannot both be params: the cartesian
+ * product would be 72, and the tree says 6.
+ *
+ * So a template may declare params that are **not in its `paramSpace`** and fill
+ * them in per rep. Item ids come from the space alone, which is what keeps a
+ * year of history keyed on "M3 ascending" rather than on "M3 from F#3". The rule
+ * that makes this safe is one line: a key in the param space is part of the
+ * item's identity forever, and a key filled in by `prepare` is part of one rep.
  */
 
 import type {
@@ -37,10 +53,19 @@ import { itemIdOf } from './hash.ts';
 export type ParamValue = string | number;
 export type DrillParams = Record<string, ParamValue>;
 
-/** The declared alternatives per param. Their product is the item pool. */
+/**
+ * The declared alternatives per param. Their product is the item pool.
+ *
+ * Optional keys of `P` stay optional here, which is what lets a template carry
+ * a per-rep param (see `prepare`) without it entering the product or the item
+ * id. Declaring one anyway would silently re-key the whole deck, so do not.
+ */
 export type ParamSpace<P extends DrillParams> = {
   readonly [K in keyof P]: readonly P[K][];
 };
+
+/** Injectable so a rep can be reproduced in a test. Returns [0, 1). */
+export type Rng = () => number;
 
 export type PromptMode = 'text' | 'chord-symbol' | 'notation-lite' | 'audio';
 
@@ -80,6 +105,13 @@ export interface DrillTemplate<P extends DrillParams = DrillParams> {
   promptMode: PromptMode;
   answerMode: AnswerMode;
   paramSpace: ParamSpace<P>;
+  /**
+   * Fill in whatever varies between two reps of the same item: the key an
+   * interval is heard in, the spelling a note is asked for by. Called once per
+   * rep, before anything else, and its result is what `buildExpected` and `view`
+   * are given. Absent means the item is the whole prompt.
+   */
+  prepare?(params: P, rng: Rng): P;
   /** Expected pitches, deterministic, via tonal only. Never `Chord.detect`. */
   buildExpected(params: P): ExpectedPerformance;
   grading: GradingSpec;

@@ -88,12 +88,12 @@ export const clampEase = (ease: number): number =>
   Math.min(EASE_MAX, Math.max(EASE_MIN, ease));
 
 /**
- * The rating for one graded rep (session-generator.md section 2).
+ * The rating for one graded rep of an untimed drill (session-generator.md
+ * section 2). Correctness gates, latency grades.
  *
- * `latencyMs` is null in two unrelated cases and they are not the same fact.
- * A timed drill has no latency by construction, and section 2's pass rules say
- * a clean pass at target is `good`. An untimed drill with a null latency was
- * never answered at all, and correctness has already made it `again`.
+ * `latencyMs` is null here only when nothing was ever played, and correctness
+ * has already made that `again`. A timed drill has no latency by construction
+ * and is rated by `ratingForPass` instead.
  */
 export function ratingFor(
   correct: boolean,
@@ -105,6 +105,34 @@ export function ratingFor(
   if (latencyMs < bands.automaticMs) return 'easy';
   if (latencyMs <= bands.knownMs) return 'good';
   return 'hard';
+}
+
+/**
+ * The rating for one timed rep (session-generator.md section 2): "for
+ * tempo/pass drills (scales, legato, sync) latency bands don't apply; instead:
+ * clean pass at target = `good`, clean pass exceeding target (higher tempo tier)
+ * = `easy`, pass with threshold misses but no note errors = `hard`."
+ *
+ * The middle case is the one that matters and the one a naive implementation
+ * loses. Eight notes in the right order, all of them matched, mean average error
+ * 38ms against a maximum of 35: that is not a failure, it is a near miss, and
+ * rating it `again` would count a lapse, cut the interval to a third and put the
+ * item eight reps from being suspended as a leech. `hard` is what the document
+ * says and what the case deserves.
+ *
+ * `exceededTarget` is left for the difficulty governor to supply. Nothing sets
+ * it yet: every timed item in V1 declares its own tempo, so a pass is at target
+ * by construction until section 9's governor starts raising them.
+ */
+export function ratingForPass(opts: {
+  /** The grader's verdict: all notes matched and every stat under its maximum. */
+  correct: boolean;
+  /** No missing, extra or wrong notes, whatever the timing did. */
+  notesClean: boolean;
+  exceededTarget?: boolean;
+}): Rating {
+  if (opts.correct) return opts.exceededTarget === true ? 'easy' : 'good';
+  return opts.notesClean ? 'hard' : 'again';
 }
 
 export const RATING_LABELS: Record<Rating, string> = {
@@ -281,8 +309,13 @@ export function applyRating(
     reps: state.reps + 1,
     lapses,
     accEMA: ema(state.reps === 0 ? null : state.accEMA, correct ? 1 : 0),
+    // A latency at or below zero is not an observation. It cannot happen with a
+    // visual prompt, where the clock starts at the paint, but an ear prompt
+    // starts it at the end of playback (architecture.md section 5) and a user
+    // who answers into the last note's tail would otherwise seed the average
+    // with a negative number, which `hasLatency` then reads as no data at all.
     latEMA:
-      correct && latencyMs !== null
+      correct && latencyMs !== null && latencyMs > 0
         ? ema(hasLatency(state) ? state.latEMA : null, latencyMs)
         : state.latEMA,
     history,

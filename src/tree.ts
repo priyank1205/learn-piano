@@ -87,3 +87,64 @@ export function deckFluencyOf(id: string): DeckFluency | null {
     minRepsPerItem: Number(t.minRepsPerItem),
   };
 }
+
+/**
+ * `timedRun` thresholds (architecture.md section 7). The numbers a pass is
+ * judged against live in the tree, not in the drill, so a re-tuned tempo target
+ * or a widened error budget is a curriculum edit rather than a code edit. The
+ * rhythm drill reads its own node's row and hands the per-rep half of it to the
+ * grader; the per-node half (`cleanPasses`, `perHand`) stays here.
+ */
+export interface TimedRun {
+  tempoBpm: number;
+  notesPerBeat: number;
+  noteAccuracy: number;
+  meanAbsErrMsMax?: number;
+  timingSdMsMax?: number;
+  handOnsetSkewMsMax?: number;
+  cleanPasses: number;
+  perHand: boolean;
+}
+
+const numberOr = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+const optionalNumber = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+
+export function timedRunOf(id: string): TimedRun | null {
+  const t = BY_ID.get(id)?.masteryThreshold;
+  if (!t || t.type !== 'timedRun') return null;
+  return {
+    tempoBpm: numberOr(t.tempoBpm, 100),
+    notesPerBeat: numberOr(t.notesPerBeat, 1),
+    noteAccuracy: numberOr(t.noteAccuracy, 1),
+    meanAbsErrMsMax: optionalNumber(t.meanAbsErrMsMax),
+    timingSdMsMax: optionalNumber(t.timingSdMsMax),
+    handOnsetSkewMsMax: optionalNumber(t.handOnsetSkewMsMax),
+    cleanPasses: numberOr(t.cleanPasses, 3),
+    perHand: t.perHand === true,
+  };
+}
+
+/**
+ * `earDeck` thresholds (architecture.md section 7). The only threshold shape in
+ * the tree that is judged over a **rolling window of recent reps** rather than
+ * per item: "answer matches; rolling window". That is why `nodeProgress` takes
+ * the rep log as well as the item states.
+ */
+export interface EarDeck {
+  accuracy: number;
+  windowItems: number;
+  medianResponseMsMax: number;
+}
+
+export function earDeckOf(id: string): EarDeck | null {
+  const t = BY_ID.get(id)?.masteryThreshold;
+  if (!t || t.type !== 'earDeck') return null;
+  return {
+    accuracy: numberOr(t.accuracy, 0.9),
+    windowItems: numberOr(t.windowItems, 40),
+    medianResponseMsMax: numberOr(t.medianResponseMsMax, 2500),
+  };
+}

@@ -32,9 +32,9 @@ import { LATENCY_BANDS, runner } from '../grade/index.ts';
 import type { LatencyBands, Rep } from '../grade/index.ts';
 import { median } from '../stats.ts';
 import { ItemQueue } from './queue.ts';
-import { instantiate } from './types.ts';
 import type { DrillItem } from './types.ts';
-import { itemById, itemsForNodes, templateForItem } from './registry.ts';
+import { itemById, itemsForNodes } from './registry.ts';
+import { presentItem, stopPresentation } from './present.ts';
 import { store } from '../store/store.ts';
 import type { ReturnMode } from '../store/types.ts';
 import { SessionPlanner, deriveProgress } from '../schedule/index.ts';
@@ -295,6 +295,9 @@ class Practice {
       bands: store.settings.latencyBandsMs,
       completedAt: store.completedAt,
       satisfiedRequires: store.settings.hasPedal ? ['pedal'] : [],
+      // The ear deck's threshold is a rolling window over recent reps rather
+      // than a per-item count (architecture.md section 7).
+      reps: store.recentReps,
     });
 
     const nodeIds = active.map((a) => a.nodeId);
@@ -378,6 +381,9 @@ class Practice {
       bands: store.settings.latencyBandsMs,
       completedAt: store.completedAt,
       satisfiedRequires: store.settings.hasPedal ? ['pedal'] : [],
+      // The ear deck's threshold is a rolling window over recent reps rather
+      // than a per-item count (architecture.md section 7).
+      reps: store.recentReps,
     });
     const met = [...progress.values()].filter((p) => p.complete).map((p) => p.nodeId);
     await store.markComplete(met);
@@ -386,6 +392,8 @@ class Practice {
   next(): void {
     if (this.status !== 'running') return;
     this.cancelAdvance();
+    // Whatever the last prompt started (a metronome) stops before the next one.
+    stopPresentation();
 
     const planned = this.planner ? this.planner.next() : null;
     const item = this.planner ? (planned?.item ?? null) : (this.queue?.next() ?? null);
@@ -394,8 +402,10 @@ class Practice {
       return;
     }
     this.reason = planned?.reason ?? null;
-    this.current = item;
-    runner.arm(instantiate(templateForItem(item), item));
+    // The prepared item, not the pool item: an ear prompt is asked in a key
+    // drawn for this rep, and the screen has to show the rep that was played.
+    // Ids and nodes are the pool's, so the log and the SRS are unaffected.
+    this.current = presentItem(item);
     this.bump();
   }
 
@@ -493,6 +503,7 @@ class Practice {
     this.cancelAdvance();
     this.unsubscribeRunner?.();
     this.unsubscribeRunner = null;
+    stopPresentation();
     runner.cancel();
   }
 }

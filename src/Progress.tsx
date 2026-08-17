@@ -26,7 +26,7 @@ import {
 import { deriveProgress, sessionCapacity } from './schedule/index.ts';
 import type { NodeProgress } from './schedule/index.ts';
 import { itemById } from './drills/index.ts';
-import { nodeName } from './tree.ts';
+import { deckFluencyOf, nodeName } from './tree.ts';
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
@@ -226,7 +226,15 @@ function MasteryPanel({ progress }: { progress: ReadonlyMap<string, NodeProgress
                     </span>{' '}
                     {p.mastered}/{p.itemCount}
                   </td>
-                  <td>{p.measurable && p.drillable ? pct(p.automaticShare) : '-'}</td>
+                  {/* The automatic share is a `deckFluency` statistic: the share
+                      of items answered under the 1.2s band. A timed run has no
+                      latency to be under it, so showing 0% there would read as
+                      failure rather than as the wrong question. */}
+                  <td>
+                    {p.measurable && p.drillable && deckFluencyOf(p.nodeId) !== null
+                      ? pct(p.automaticShare)
+                      : '-'}
+                  </td>
                 </tr>
               );
             })}
@@ -235,9 +243,12 @@ function MasteryPanel({ progress }: { progress: ReadonlyMap<string, NodeProgress
       </div>
       <p className="note muted">
         Mastery counts items whose last three reps were correct, whose accuracy is over
-        the node&apos;s threshold, and whose moving latency is under the automatic band.
-        The denominator is the item count the tree declares, not the number that happen to
-        have drills, so a node is never complete because only part of it is built.
+        the node&apos;s threshold, and whose moving latency is inside the target that
+        threshold sets. A timed node counts clean passes instead, and an ear deck is
+        judged over a rolling window of recent reps rather than per item, which is the
+        line under its name. The denominator is the item count the tree declares, not the
+        number that happen to have drills, so a node is never complete because only part
+        of it is built.
       </p>
     </div>
   );
@@ -250,6 +261,13 @@ function nodeNote(p: NodeProgress): string {
   if (p.missingRequires.length > 0) return `needs ${p.missingRequires.join(', ')}`;
   if (p.bypassedDeps.length > 0) {
     return `${p.bypassedDeps.map(nodeName).join(', ')} has no drill yet, so it is not gating`;
+  }
+  // An ear deck is judged over a rolling window rather than per item, so its
+  // mastery bar alone does not say whether it is finishing. Show the window.
+  if (p.window !== null && p.window.reps > 0) {
+    const median =
+      p.window.medianMs === null ? '-' : `${Math.round(p.window.medianMs)}ms`;
+    return `last ${p.window.reps}: ${pct(p.window.accuracy)}, median ${median}`;
   }
   return '';
 }
@@ -383,15 +401,16 @@ export default function ProgressScreen() {
     void store.load();
   }, []);
 
-  const { itemState, completedAt, settings } = s;
+  const { itemState, completedAt, settings, recentReps } = s;
   const derived = useMemo(
     () =>
       deriveProgress(itemState, {
         bands: settings.latencyBandsMs,
         completedAt,
         satisfiedRequires: settings.hasPedal ? ['pedal'] : [],
+        reps: recentReps,
       }),
-    [itemState, completedAt, settings]
+    [itemState, completedAt, settings, recentReps]
   );
 
   if (s.status === 'error') {

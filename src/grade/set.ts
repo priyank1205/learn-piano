@@ -216,7 +216,21 @@ function gradeCluster(
   };
 }
 
+/**
+ * An untimed rep is over once a cluster has settled (architecture.md section 4).
+ * The predicate is `settledAnswer` itself, so the runner can never stop
+ * listening on a rep this grader would still be waiting on.
+ */
+export function setFinished(
+  events: readonly NormalizedEvent[],
+  spec: DrillInstance,
+  ctx: GradeContext = {}
+): boolean {
+  return settledAnswer(events, spec, ctx) !== null;
+}
+
 export const setGrader: Grader = {
   id: 'set',
   grade: gradeSet,
+  isFinished: setFinished,
 };

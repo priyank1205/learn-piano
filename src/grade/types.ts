@@ -11,7 +11,11 @@
 
 import type { Hand, NormalizedEvent } from '../midi.ts';
 
-/** The six grader families in architecture.md section 2. Only `set` exists yet. */
+/**
+ * The six grader families in architecture.md section 2. `set` (untimed) and
+ * `sequence` (timed against a grid) exist; the other four arrive with the drills
+ * that need them.
+ */
 export type GraderId = 'set' | 'sequence' | 'legato' | 'sync' | 'piece' | 'pedal';
 
 export interface ExpectedEvent {
@@ -154,10 +158,32 @@ export function latencyBand(
   return 'not-known';
 }
 
+/**
+ * What makes one timed rep a **clean pass**.
+ *
+ * This is the per-rep half of architecture.md section 7's `timedRun` row, and it
+ * is passed to the grader rather than looked up by it, for the same reason the
+ * tolerances are: the numbers belong to the curriculum (`skill-tree.json`), and
+ * a grader that read the tree would be a grader that could not be tested against
+ * a number the tree does not contain.
+ *
+ * The other half of that row (`cleanPasses`, `perHand`) is about the node rather
+ * than the rep, and stays in `schedule/mastery.ts`.
+ */
+export interface PassCriteria {
+  /** Share of expected events that must be matched. 1 means all of them. */
+  noteAccuracy: number;
+  meanAbsErrMsMax?: number;
+  timingSdMsMax?: number;
+  handOnsetSkewMsMax?: number;
+}
+
 export interface GradingSpec {
   graderId: GraderId;
   weights?: Weights;
   tolerances?: Partial<Tolerances>;
+  /** Timed drills only. Absent means identity alone decides correctness. */
+  pass?: PassCriteria;
 }
 
 /**
@@ -184,6 +210,21 @@ export interface DrillInstance {
    * Latency is measured from here, so it never includes listening time.
    */
   promptReadyAt: DOMHighResTimeStamp;
+  /**
+   * Timed drills only: when beat 0 of the expected grid falls, on the MIDI
+   * clock.
+   *
+   * architecture.md section 4 says the grid comes "from Transport at the drill
+   * tempo" and stops there, but a Transport position is a time on the
+   * `AudioContext` clock and every played note is a time on the
+   * `performance.now()` clock. Something has to name the instant where the two
+   * meet, and this is it: one number, converted once through the calibrated
+   * offset (`audio/clock.ts`) by whoever started the Transport. Getting it wrong
+   * shifts every timing error by a constant, which is precisely the failure
+   * CLAUDE.md's clock gotcha warns about, so it is a field a grader can be
+   * tested against rather than a conversion buried inside one.
+   */
+  gridStartMs?: DOMHighResTimeStamp;
   /** App-level transpose the user set for the 61-key window. Applied to expected. */
   transposeOffset?: number;
 }
@@ -263,4 +304,18 @@ export interface Grader {
     spec: DrillInstance,
     ctx?: GradeContext
   ): GradeResult;
+  /**
+   * Live: is this rep over?
+   *
+   * The second half of the addition `GradeContext` starts. Knowing when to stop
+   * listening is grader knowledge and differs per family: an untimed drill is
+   * over when a chord has settled, a timed one when the grid has run out. With
+   * it on the contract the runner never has to know which drill it is holding,
+   * and it can never grade a rep its own grader would consider unfinished.
+   */
+  isFinished(
+    events: readonly NormalizedEvent[],
+    spec: DrillInstance,
+    ctx: GradeContext
+  ): boolean;
 }

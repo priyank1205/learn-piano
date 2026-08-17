@@ -19,24 +19,49 @@
  * **Nothing measured depends on when the check fires.** Every number in the
  * result comes from MIDI event timestamps, so a late frame delays the feedback
  * appearing and cannot change the latency, the spread, or the grade. The only
- * clock reading is "has the settle window passed yet", and that is monotonic.
+ * clock reading is "has the rep finished yet", and that is monotonic.
+ *
+ * Slice 6 added two things and took one away.
+ *
+ * **The runner no longer knows which grader it is holding.** It looks one up
+ * from `spec.grading.graderId` for both grading and for deciding the rep is
+ * over. Waiting for a chord to settle is right for a flashcard and wrong for a
+ * pulse drill, where the rep ends when the grid runs out whether or not anything
+ * was played, and that difference is grader knowledge (`Grader.isFinished`).
+ *
+ * **A prompt can take time to deliver.** architecture.md section 5 is explicit
+ * that `promptReadyAt` is "end of audio playback for ear prompts", because
+ * latency must never include listening time. A `Presenter` is how a caller says
+ * so: it is handed the paint timestamp, delivers the prompt, and returns the
+ * instant the user could first have answered.
  */
 
 import { useSyncExternalStore } from 'react';
 import { midi } from '../midi.ts';
 import type { NormalizedEvent } from '../midi.ts';
-import { gradeSet, settledAnswer } from './set.ts';
+import { graderFor } from './graders.ts';
 import { withTolerances } from './types.ts';
 import type { DrillInstance, GradeResult } from './types.ts';
 
 /** A prompt before it has been shown: `promptReadyAt` is the runner's to fill. */
 export type PendingPrompt = Omit<DrillInstance, 'promptReadyAt'>;
 
+/**
+ * Deliver a prompt that is not simply on screen, and say when it was ready.
+ *
+ * Given the paint timestamp, returns the moment the answer could first have
+ * begun, on the MIDI clock. An ear prompt plays two notes and returns the end of
+ * playback; anything visual has nothing to do and needs no presenter at all.
+ */
+export type Presenter = (paintedAt: number) => number | Promise<number>;
+
 export type RunnerState =
   /** Nothing prompted. */
   | 'idle'
   /** Prompt rendered, waiting for paint to timestamp it. */
   | 'arming'
+  /** Painted, and the prompt is still being delivered. Ear drills only. */
+  | 'presenting'
   /** Prompt is up; the user is answering. */
   | 'waiting'
   /** Graded. The result is on `last`. */
@@ -92,8 +117,13 @@ class GradeRunner {
   /**
    * Show a prompt. Collection starts immediately so nothing is missed, and the
    * grader discards whatever arrived before `promptReadyAt`.
+   *
+   * With a `present` callback the prompt is delivered after the paint and the
+   * clock starts when that finishes, which is what an ear prompt needs: notes
+   * struck while the prompt is still playing land before `promptReadyAt` and are
+   * discarded the same way notes struck before the prompt appeared are.
    */
-  arm(prompt: PendingPrompt): void {
+  arm(prompt: PendingPrompt, present?: Presenter): void {
     this.stopWatching();
     this.events = [];
     this.spec = null;
@@ -108,12 +138,31 @@ class GradeRunner {
     requestAnimationFrame(() => {
       requestAnimationFrame((paintedAt) => {
         if (token !== this.armToken || this.state !== 'arming') return;
-        this.spec = { ...prompt, promptReadyAt: paintedAt };
-        this.state = 'waiting';
+        if (!present) {
+          this.begin(prompt, paintedAt, token);
+          return;
+        }
+        this.state = 'presenting';
         this.bump();
-        this.watch();
+        void Promise.resolve(present(paintedAt)).then(
+          (readyAt) => this.begin(prompt, readyAt, token),
+          // A prompt that cannot be delivered (audio not started, a device gone)
+          // still has to leave the loop somewhere it can move on from, so the
+          // rep opens at the paint and the user can submit or skip it.
+          () => this.begin(prompt, paintedAt, token)
+        );
       });
     });
+  }
+
+  /** The clock starts here: the prompt is up and the answer is being waited for. */
+  private begin(prompt: PendingPrompt, readyAt: number, token: number): void {
+    if (token !== this.armToken) return;
+    if (this.state !== 'arming' && this.state !== 'presenting') return;
+    this.spec = { ...prompt, promptReadyAt: readyAt };
+    this.state = 'waiting';
+    this.bump();
+    this.watch();
   }
 
   /** Abandon the current prompt without grading it. */
@@ -139,15 +188,15 @@ class GradeRunner {
   }
 
   private onEvent(event: NormalizedEvent): void {
-    if (this.state !== 'waiting' && this.state !== 'arming') return;
+    if (this.state === 'idle' || this.state === 'answered') return;
     this.events.push(event);
     // Held notes and releases are worth seeing on screen while answering.
     if (event.type === 'on') this.bump();
   }
 
   /**
-   * Poll the settle condition on animation frames. The predicate is the same
-   * `settledAnswer` the grader uses, so the runner can never grade a rep the
+   * Poll the finish condition on animation frames. The predicate belongs to the
+   * grader that will do the grading, so the runner can never close a rep that
    * grader would consider unfinished.
    */
   private watch(): void {
@@ -155,7 +204,8 @@ class GradeRunner {
       this.frame = requestAnimationFrame(tick);
       if (this.state !== 'waiting' || !this.spec) return;
       const nowMs = performance.now();
-      if (settledAnswer(this.events, this.spec, { nowMs })) this.finish(nowMs);
+      const grader = graderFor(this.spec.grading.graderId);
+      if (grader.isFinished(this.events, this.spec, { nowMs })) this.finish(nowMs);
     };
     this.frame = requestAnimationFrame(tick);
   }
@@ -171,7 +221,7 @@ class GradeRunner {
     const spec = this.spec;
     if (!spec) return;
     this.stopWatching();
-    const result = gradeSet(this.events, spec, { nowMs });
+    const result = graderFor(spec.grading.graderId).grade(this.events, spec, { nowMs });
     const rep: Rep = { spec, result };
     this.last = rep;
     this.history = [...this.history, rep];
@@ -179,9 +229,15 @@ class GradeRunner {
     this.bump();
   }
 
-  /** Milliseconds until the current answer settles, for the on-screen countdown. */
+  /**
+   * Milliseconds until the current answer settles, for the on-screen countdown.
+   * Untimed drills only: a timed rep is not waiting for silence, it is waiting
+   * for the grid to run out, and there is nothing to count down to.
+   */
   settleRemainingMs(nowMs: number): number | null {
     if (this.state !== 'waiting' || !this.spec) return null;
+    // "tempoBpm present => timed grading" (architecture.md section 2).
+    if (this.spec.expected.tempoBpm !== undefined) return null;
     let lastOnTs: number | null = null;
     for (let i = this.events.length - 1; i >= 0; i -= 1) {
       const e = this.events[i]!;

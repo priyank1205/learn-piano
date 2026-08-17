@@ -1,6 +1,5 @@
 /**
- * The inversion trainer. V1 drill 1, and the first screen in this app that is
- * for practising rather than for proving something works.
+ * The practice screen. Everything with a drill behind it runs here.
  *
  * The whole design serves one number. He can derive an inversion in about four
  * seconds and the target is under 1.2, so every element here either shows a
@@ -12,11 +11,20 @@
  * practice** is a deck chosen by hand in a shuffled cycle, which is what slice 4
  * built and is still the right thing when the user wants to hammer one deck.
  * Both persist, and both feed the same SRS.
+ *
+ * Slice 6 is where "drills are data" stopped being a claim. This screen now
+ * serves four drills of three different shapes, and it knows the id of none of
+ * them: what it renders comes from the template's `view`, and how it reports a
+ * result comes from the shape of the `GradeResult`. A rep with a latency is
+ * reported in milliseconds and a band; a rep with timing statistics is reported
+ * as a pass against them. The deck list is the registry's, not a constant. If a
+ * seventh drill needs an edit here, the schema was wrong.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   DEFAULT_DWELL_MS,
+  drillableNodeIds,
   itemsForNode,
   itemsForNodes,
   practice,
@@ -33,15 +41,47 @@ import {
   runner,
   useGradeRunner,
 } from './grade/index.ts';
-import { deckFluencyOf, nodeById, nodeName } from './tree.ts';
-import { pitchClassName } from './theory.ts';
-import { session, useAudioSession } from './audio/index.ts';
+import type { GradeResult } from './grade/index.ts';
+import { NODES, deckFluencyOf, nodeById, nodeName } from './tree.ts';
+import { noteNameOf, pitchClassName } from './theory.ts';
+import { beatIndexAt, session, useAudioSession, useAudioTick } from './audio/index.ts';
 import { useMidiState } from './midi.ts';
 
-/** The nodes the inversion trainer can drill, in the tree's dependency order. */
-const DECK_NODES = ['kt-triads-root', 'kt-inv-maj-triads', 'kt-inv-min-triads'] as const;
+/**
+ * Every node some registered drill can exercise, in the tree's own order. Read
+ * from the registry rather than listed, so a drill that lands is a deck that
+ * appears.
+ */
+const DECK_NODES: readonly string[] = NODES.map((n) => n.id).filter((id) =>
+  drillableNodeIds().includes(id)
+);
 
 const ms = (v: number) => `${Math.round(v)}ms`;
+
+/**
+ * "tempoBpm present => timed grading" (architecture.md section 2).
+ *
+ * Read from the spec rather than from the result, which is a distinction with
+ * teeth: a run where nothing was played has no timing statistics either, and a
+ * result-shaped test would report it as eight identical missing notes instead of
+ * as a run that did not happen.
+ */
+const isTimed = (rep: PracticeRep): boolean =>
+  rep.rep.spec.expected.tempoBpm !== undefined;
+
+const countErrors = (result: GradeResult): number =>
+  result.noteErrors.missing.length +
+  result.noteErrors.extra.length +
+  result.noteErrors.wrong.length;
+
+/**
+ * How a note is named back to the user: as a pitch class when the drill graded
+ * pitch classes, as a note when it graded notes. Reporting "you played C where C
+ * was expected" after a missed octave in the ear drill would be true, useless
+ * and infuriating.
+ */
+const nameFor = (octaveEquivalent: boolean, sharps: boolean) => (value: number) =>
+  octaveEquivalent ? pitchClassName(value, { sharps }) : noteNameOf(value, { sharps });
 
 function DeckPicker({
   selected,
@@ -78,6 +118,78 @@ function DeckPicker({
 }
 
 /**
+ * The beat, while a timed rep runs.
+ *
+ * Read from the clock on animation frames rather than counted by a Transport
+ * callback, for the reason `audio/transport.ts` gives: with no look-ahead, Tone
+ * dispatches its callbacks late, and a counter that is late is not the beat. The
+ * count-in counts down, then a dot fills per beat.
+ */
+function PulseBar() {
+  const audio = useAudioSession();
+  const plan = audio.pulse;
+  const tick = useAudioTick(plan !== null, 40);
+  if (!plan) return null;
+
+  const beat = tick > 0 ? beatIndexAt(plan, tick) : -plan.countInBeats;
+  if (beat < 0) {
+    return (
+      <div className="pulse-bar count-in">
+        <span className="count">{-beat}</span>
+        <span className="muted">counting in</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pulse-bar">
+      {Array.from({ length: plan.beats }, (_, i) => (
+        <span
+          key={i}
+          className={i < beat ? 'beat done' : i === beat ? 'beat now' : 'beat'}
+        />
+      ))}
+      <span className="muted">
+        beat {Math.min(beat + 1, plan.beats)} of {plan.beats}
+      </span>
+    </div>
+  );
+}
+
+/** What one graded rep is worth saying, in the terms that rep was measured in. */
+function ResultLine({
+  result,
+  view,
+  timed,
+}: {
+  result: GradeResult;
+  view: PromptView;
+  timed: boolean;
+}) {
+  if (!result.correct) {
+    return <span className="bad">{view.answer}</span>;
+  }
+  if (timed && result.timingErrorMs !== null) {
+    const timing = result.timingErrorMs;
+    return (
+      <span className="ok">
+        clean pass
+        <span className="band automatic">
+          {ms(timing.meanAbs)} off, sd {ms(timing.sd)}
+        </span>
+      </span>
+    );
+  }
+  const band = latencyBand(result.latencyMs);
+  return (
+    <span className="ok">
+      {result.latencyMs === null ? 'correct' : ms(result.latencyMs)}
+      {band && <span className={`band ${band}`}>{latencyBandLabel(band)}</span>}
+    </span>
+  );
+}
+
+/**
  * The prompt. Deliberately the only thing on screen that moves while the clock
  * is running: the answer, the errors and the stats all appear after the rep is
  * graded, never during it.
@@ -85,18 +197,19 @@ function DeckPicker({
 function PromptCard({
   item,
   view,
+  timed,
   last,
   idleHint,
 }: {
   item: DrillItem | null;
   view: PromptView | null;
+  timed: boolean;
   last: PracticeRep | null;
   idleHint: React.ReactNode;
 }) {
   const r = useGradeRunner();
   const graded = r.state === 'answered' && last !== null && last.item === item;
   const result = graded && last ? last.rep.result : null;
-  const band = latencyBand(result?.latencyMs ?? null);
 
   if (!item || !view) {
     return (
@@ -110,25 +223,35 @@ function PromptCard({
     <div className={`prompt-card${result ? (result.correct ? ' ok' : ' bad') : ''}`}>
       <div className="prompt-symbol">{view.primary}</div>
       <div className="prompt-sub">{view.secondary}</div>
+      {timed && result === null && <PulseBar />}
       <div className="prompt-state">
-        {result === null && <span className="muted">waiting</span>}
-        {result !== null && result.correct && (
-          <span className="ok">
-            {result.latencyMs === null ? 'correct' : ms(result.latencyMs)}
-            {band && <span className={`band ${band}`}>{latencyBandLabel(band)}</span>}
-          </span>
+        {/* Presenting is an ear prompt still playing. The clock has not started
+            yet: latency runs from the end of playback, never from the paint. */}
+        {result === null && r.state === 'presenting' && (
+          <span className="settling">listen</span>
         )}
-        {result !== null && !result.correct && <span className="bad">{view.answer}</span>}
+        {result === null && r.state !== 'presenting' && (
+          <span className="muted">{timed ? 'play with the click' : 'waiting'}</span>
+        )}
+        {result !== null && <ResultLine result={result} view={view} timed={timed} />}
       </div>
     </div>
   );
 }
 
-/** What went wrong, in pitch classes, because the drill grades pitch classes. */
+/**
+ * What went wrong, said in whichever space the drill graded in: pitch classes
+ * for the octave-equivalent drills, notes for the ear drill, and counts rather
+ * than a list of eight identical taps for a timed run.
+ */
 function MissDetail({ rep, view }: { rep: PracticeRep; view: PromptView }) {
-  const { result } = rep.rep;
-  const pc = (value: number) => pitchClassName(value, { sharps: view.sharps });
+  const { result, spec } = rep.rep;
+  const name = nameFor(spec.constraints.octaveEquivalent === true, view.sharps);
   const event = result.perEvent[0];
+
+  if (isTimed(rep)) {
+    return <TimingDetail result={result} />;
+  }
 
   return (
     <ul className="errors">
@@ -138,22 +261,72 @@ function MissDetail({ rep, view }: { rep: PracticeRep; view: PromptView }) {
           underneath
         </li>
       )}
-      {result.noteErrors.wrong.map((w) => (
-        <li key={`w${w.expected}`}>
-          played <strong>{pc(w.played)}</strong> where <strong>{pc(w.expected)}</strong>{' '}
-          was expected
+      {/* Keyed by position, not by pitch: the same note can be reported more
+          than once in one rep, and a duplicate key silently drops a line. */}
+      {result.noteErrors.wrong.map((w, i) => (
+        <li key={`w${i}`}>
+          played <strong>{name(w.played)}</strong> where{' '}
+          <strong>{name(w.expected)}</strong> was expected
         </li>
       ))}
-      {result.noteErrors.missing.map((p) => (
-        <li key={`m${p}`}>
-          missing <strong>{pc(p)}</strong>
+      {result.noteErrors.missing.map((p, i) => (
+        <li key={`m${i}`}>
+          missing <strong>{name(p)}</strong>
         </li>
       ))}
-      {result.noteErrors.extra.map((p) => (
-        <li key={`e${p}`}>
-          extra <strong>{pc(p)}</strong>
+      {result.noteErrors.extra.map((p, i) => (
+        <li key={`e${i}`}>
+          extra <strong>{name(p)}</strong>
         </li>
       ))}
+    </ul>
+  );
+}
+
+/**
+ * Why a run did not pass. The distinction it exists to draw is the one
+ * session-generator.md section 2 draws when it rates a near miss `hard` rather
+ * than `again`: notes in the wrong place is a different failure from notes in
+ * the wrong order, and only one of them means the user cannot play the pattern.
+ */
+function TimingDetail({ result }: { result: GradeResult }) {
+  const timing = result.timingErrorMs;
+  const notes = countErrors(result);
+
+  // Nothing landed on the grid at all: the run did not happen, and listing every
+  // beat as a missing note says that eight times over instead of once.
+  if (timing === null) {
+    return (
+      <ul className="errors">
+        <li>
+          nothing landed on the beat. The count-in is four clicks, then play on every
+          click after it.
+        </li>
+      </ul>
+    );
+  }
+
+  const rushing = timing.mean < 0;
+
+  return (
+    <ul className="errors">
+      {notes === 0 ? (
+        <li>
+          every note landed. <strong>{ms(timing.meanAbs)}</strong> off the beat on
+          average, {rushing ? 'ahead of' : 'behind'} the click by{' '}
+          <strong>{ms(Math.abs(timing.mean))}</strong>, spread{' '}
+          <strong>{ms(timing.sd)}</strong>
+        </li>
+      ) : (
+        <li>
+          <strong>{notes}</strong> note{notes === 1 ? '' : 's'} missing, extra or wrong.
+          Play the pattern before playing it in time.
+        </li>
+      )}
+      <li className="muted">
+        {result.perEvent.filter((e) => e.status === 'on-time').length} of{' '}
+        {result.perEvent.filter((e) => e.index >= 0).length} beats inside the window
+      </li>
     </ul>
   );
 }
@@ -327,15 +500,36 @@ export default function TrainerScreen() {
     void store.load();
   }, []);
 
+  /**
+   * Starting practice starts audio. Two of the four drills are unanswerable
+   * without it, since an ear prompt has to be heard and a pulse drill has to be
+   * counted in, and this click is the user gesture Chrome requires. It is
+   * awaited so that the first prompt of the session is not the silent one.
+   */
   const begin = useCallback(() => {
-    if (mode === 'scheduled') void practice.startScheduled();
-    else void practice.start(deck);
+    void (async () => {
+      if (session.status !== 'ready') await session.start();
+      if (mode === 'scheduled') await practice.startScheduled();
+      else await practice.start(deck);
+    })();
   }, [mode, deck]);
+
   const item = p.current;
+  const template = useMemo(() => (item ? templateForItem(item) : null), [item]);
   const view = useMemo(
-    () => (item ? templateForItem(item).view(item.params) : null),
-    [item]
+    () => (template && item ? template.view(item.params) : null),
+    [template, item]
   );
+  // "tempoBpm present => timed grading" (architecture.md section 2). The screen
+  // asks the drill rather than being told which drill it is.
+  const timed = useMemo(
+    () =>
+      template && item
+        ? template.buildExpected(item.params).tempoBpm !== undefined
+        : false,
+    [template, item]
+  );
+
   const last = p.reps.length > 0 ? p.reps[p.reps.length - 1]! : null;
   const graded = r.state === 'answered' && last !== null && last.item === item;
   const missed = graded && last !== null && !last.rep.result.correct;
@@ -343,9 +537,15 @@ export default function TrainerScreen() {
   // about to be started comes from the selection instead.
   const pending = useMemo(() => itemsForNodes(deck).length, [deck]);
 
+  /**
+   * Sound the prompt. Melodic for an ear drill, because an interval played as a
+   * chord is a different exercise, and together for everything else.
+   */
   const hear = useCallback(() => {
-    if (view && audio.status === 'ready') session.play(view.audition);
-  }, [view, audio.status]);
+    if (!view || audio.status !== 'ready') return;
+    if (template?.promptMode === 'audio') session.playSequence(view.audition);
+    else session.play(view.audition);
+  }, [view, template, audio.status]);
 
   /**
    * One key does everything: start, submit, continue. A drill that needs a
@@ -469,6 +669,7 @@ export default function TrainerScreen() {
       <PromptCard
         item={item}
         view={view}
+        timed={timed}
         last={graded ? last : null}
         idleHint={
           mode === 'scheduled' ? (
@@ -500,7 +701,13 @@ export default function TrainerScreen() {
 
       <div className="toolbar">
         <button onClick={advance} disabled={!running && deck.length === 0}>
-          {!running ? 'Start' : r.state === 'waiting' ? 'I do not know' : 'Next'}
+          {!running
+            ? 'Start'
+            : r.state !== 'waiting'
+              ? 'Next'
+              : timed
+                ? 'Stop the run'
+                : 'I do not know'}
         </button>
         <button onClick={hear} disabled={!view || audio.status !== 'ready'}>
           Hear it
@@ -547,12 +754,15 @@ export default function TrainerScreen() {
       </div>
 
       <p className="note muted">
-        Latency runs from the prompt being painted to the last note of the chord going
+        Latency runs from the prompt being ready to the last note of the answer going
         down, both read from MIDI timestamps, so a slow frame cannot flatter or spoil a
-        number. Any octave counts; the bass note does not. Correctness only decides
-        whether the latency counts: under 1.2s schedules the item further out than 4s
-        does, even though both are right. Everything here is saved, and{' '}
-        <a href="#/progress">progress</a> is where it adds up.
+        number. For an ear prompt &quot;ready&quot; is the end of playback, so listening
+        time is never charged to you. Correctness only decides whether the latency counts:
+        under 1.2s schedules the item further out than 4s does, even though both are
+        right. The pulse drill has no latency at all and is judged on where the notes
+        landed instead: every note matched, average error and spread under the tree&apos;s
+        maxima. Everything here is saved, and <a href="#/progress">progress</a> is where
+        it adds up.
       </p>
     </div>
   );

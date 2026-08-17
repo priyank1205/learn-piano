@@ -13,6 +13,11 @@
  *  3. Render the sample bank and hand it to a Tone.Sampler.
  *  4. Calibrate the MIDI-to-audio clock offset, once, and keep it.
  *  5. Subscribe the routing engine to the MIDI stream.
+ *
+ * Slice 6 added two ways for the app to make a sound on purpose rather than in
+ * response to a key: a melodic sequence for ear prompts, and the metronome the
+ * pulse drill is played against. Neither ever re-enters the MIDI stream, so
+ * nothing the app plays can influence a grade.
  */
 
 import * as Tone from 'tone';
@@ -25,6 +30,9 @@ import { buildSampleBank } from './piano.ts';
 import type { BankProgress } from './piano.ts';
 import { calibrate, driftMs } from './clock.ts';
 import type { Calibration, ClockSource } from './clock.ts';
+import { contextTimeToMidiTs } from './clock.ts';
+import { planPulse } from './transport.ts';
+import type { PulsePlan } from './transport.ts';
 
 export type AudioStatus = 'idle' | 'starting' | 'ready' | 'error';
 
@@ -39,6 +47,10 @@ export const MAX_VOLUME_DB = 6;
  * Sharps, deliberately: the sample bank's keys have to be one stable spelling.
  */
 export { noteNameOf };
+
+/** The beat grid, re-exported so a screen can read a run without reaching past this module. */
+export { beatIndexAt, beatSecondsOf, planPulse } from './transport.ts';
+export type { PulseOptions, PulsePlan } from './transport.ts';
 
 /**
  * Module-level so the AudioOut singleton can read the clock without the
@@ -87,6 +99,20 @@ class SamplerVoice implements PianoVoice {
   }
 }
 
+/**
+ * How long before the first click a run is scheduled. Long enough that every
+ * click is booked well ahead of the audio thread, short enough that pressing
+ * space does not feel like nothing happened.
+ */
+export const PULSE_LEAD_SEC = 0.12;
+
+/** Downbeat and offbeat click pitches, in Hz. High and short: a tick, not a note. */
+const CLICK_HZ = { down: 1600, beat: 1100 };
+const CLICK_SEC = 0.03;
+
+/** Ear prompts: how long each note of a melodic interval sounds. */
+export const EAR_NOTE_SEC = 0.55;
+
 export interface BankStats {
   buffers: number;
   /** Wall-clock time spent rendering the bank, so a slow machine is visible. */
@@ -102,8 +128,12 @@ class AudioSession {
   bank: BankStats | null = null;
   volumeDb = DEFAULT_VOLUME_DB;
 
+  /** The run the pulse drill is currently playing against, if any. */
+  pulse: PulsePlan | null = null;
+
   private sampler: Tone.Sampler | null = null;
   private volumeNode: Tone.Volume | null = null;
+  private click: Tone.Synth | null = null;
   private unsubscribeMidi: (() => void) | null = null;
   private subs = new Set<() => void>();
   private snapshot = 0;
@@ -188,6 +218,15 @@ class AudioSession {
         curve: 'exponential',
       }).connect(this.volumeNode);
 
+      // The metronome. A sine blip rather than a sampled woodblock: it has to be
+      // heard through a chord without being part of it, and a short high tick is
+      // the least musical thing available.
+      this.click = new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.01 },
+        volume: -10,
+      }).connect(this.volumeNode);
+
       calibration = await calibrate(raw);
 
       audio.attachVoice(new SamplerVoice(this.sampler));
@@ -248,6 +287,118 @@ class AudioSession {
       pitches.map((p) => noteNameOf(p)),
       seconds
     );
+  }
+
+  /**
+   * Sound pitches one after another, and say when the last one stops.
+   *
+   * This is how an ear prompt is delivered, so the return value matters as much
+   * as the sound: architecture.md section 5 defines `promptReadyAt` for an ear
+   * drill as the **end of audio playback**, and latency is measured from there
+   * so that listening time is never charged to the user. The end is computed on
+   * the audio clock and converted once through the calibrated offset, because
+   * the answer it will be subtracted from is a MIDI timestamp.
+   *
+   * Returns null when there is no audio to play through, which the caller has to
+   * handle: an ear prompt nobody can hear is not a rep.
+   */
+  playSequence(
+    pitches: readonly number[],
+    noteSec = EAR_NOTE_SEC
+  ): { endsAtSec: number; endsAtMs: number } | null {
+    if (!this.sampler || pitches.length === 0) return null;
+    const offsetMs = calibration?.offsetMs;
+    if (offsetMs === undefined) return null;
+    void context?.resume();
+
+    const startSec = (context?.currentTime ?? 0) + PULSE_LEAD_SEC;
+    pitches.forEach((pitch, i) => {
+      this.sampler?.triggerAttackRelease(
+        noteNameOf(pitch),
+        noteSec,
+        startSec + i * noteSec
+      );
+    });
+
+    const endsAtSec = startSec + pitches.length * noteSec;
+    return { endsAtSec, endsAtMs: contextTimeToMidiTs(endsAtSec, offsetMs) };
+  }
+
+  /**
+   * Start the metronome for one timed rep, and return the grid it plays.
+   *
+   * The Transport owns musical time here: the tempo, the position, and the beat
+   * length every click is derived from (CLAUDE.md: Tone's Transport for the
+   * clock, never `setInterval`). What it deliberately does not own is the
+   * *dispatch* of each click. `lookAhead` is 0 for the whole app so that echoing
+   * a key press is not delayed by a tenth of a second, and with no look-ahead
+   * Tone's clock hands a scheduled callback a time that has already passed, up
+   * to one update interval (50ms) late. That is inaudible for a UI callback and
+   * ruinous for a metronome the user is being graded against. So every click of
+   * the run is booked up front at its absolute time on the audio clock, which is
+   * sample accurate, and the plan those times come from is the same object the
+   * grader is handed as its grid.
+   *
+   * Returns null when audio has not been started, since there is no clock offset
+   * to place the grid on and therefore nothing honest to grade against.
+   */
+  startPulse(opts: {
+    bpm: number;
+    countInBeats: number;
+    beats: number;
+  }): PulsePlan | null {
+    if (!this.click || !context) return null;
+    const offsetMs = calibration?.offsetMs;
+    if (offsetMs === undefined) return null;
+    void context.resume();
+
+    const transport = Tone.getTransport();
+    transport.stop();
+    transport.cancel();
+    transport.position = 0;
+    transport.bpm.value = opts.bpm;
+
+    const plan = planPulse({
+      startSec: context.currentTime + PULSE_LEAD_SEC,
+      bpm: opts.bpm,
+      countInBeats: opts.countInBeats,
+      beats: opts.beats,
+      offsetMs,
+    });
+
+    transport.start(plan.startSec);
+    plan.clickTimesSec.forEach((time, i) => {
+      const down = i === plan.gridStartIndex || (i - plan.gridStartIndex) % 4 === 0;
+      this.click?.triggerAttackRelease(
+        down ? CLICK_HZ.down : CLICK_HZ.beat,
+        CLICK_SEC,
+        time
+      );
+    });
+
+    this.pulse = plan;
+    this.bump();
+    return plan;
+  }
+
+  /**
+   * Stop the metronome. Safe to call when nothing is running.
+   *
+   * Clicks are booked ahead of time (see `startPulse`), so stopping the
+   * Transport does not silence the ones already scheduled. Cancelling the click
+   * envelope from now onward is what actually ends the run, and it is the price
+   * of scheduling ahead rather than dispatching late.
+   */
+  stopPulse(): void {
+    if (!context) return;
+    const transport = Tone.getTransport();
+    transport.stop();
+    transport.cancel();
+    this.click?.envelope.cancel(context.currentTime);
+    if (this.pulse !== null) {
+      this.pulse = null;
+      this.bump();
+    }
   }
 
   /** A C major arpeggio, for checking the speakers without touching the keyboard. */

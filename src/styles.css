@@ -753,7 +753,7 @@ kbd {
   font-family: var(--mono);
 }
 
-/* Inversion trainer */
+/* Trainer */
 
 .trainer .prompt-card {
   padding: 2.2rem 1.25rem;
@@ -779,6 +779,48 @@ kbd {
 .trainer .prompt-state {
   font-size: 0.95rem;
   margin-top: 1rem;
+}
+
+/* The pulse drill's beat readout. Deliberately plain: it is being watched out
+   of the corner of an eye while playing, so it shows the beat and nothing to
+   read. */
+.pulse-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.pulse-bar .beat {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+
+.pulse-bar .beat.done {
+  background: var(--dim);
+  border-color: var(--dim);
+}
+
+.pulse-bar .beat.now {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.35);
+}
+
+.pulse-bar .muted {
+  margin-left: 0.5rem;
+  font-family: var(--mono);
+}
+
+.pulse-bar.count-in .count {
+  font-size: 2.4rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  line-height: 1;
 }
 
 .deck-picker {

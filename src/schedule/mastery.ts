@@ -15,12 +15,13 @@
  * a `NodeProgress` is computed from scratch.
  */
 
-import type { ItemState } from '../store/types.ts';
+import type { ItemState, RepRow } from '../store/types.ts';
 import type { Track, TreeNode } from '../tree.ts';
-import { NODES, deckFluencyOf, nodeById } from '../tree.ts';
+import { NODES, deckFluencyOf, earDeckOf, nodeById, timedRunOf } from '../tree.ts';
 import { itemsForNode } from '../drills/registry.ts';
 import type { LatencyBands } from '../grade/index.ts';
 import { LATENCY_BANDS } from '../grade/index.ts';
+import { median } from '../stats.ts';
 import { hasLatency } from './srs.ts';
 
 /** Unlock at 80%, "not 1.0 — completion tails shouldn't block the frontier". */
@@ -33,8 +34,18 @@ export const DECAY_MASTERY = 0.6;
 export const MAX_LEARNING_PER_TRACK = 2;
 export const MAX_LEARNING_TOTAL = 5;
 
-/** Only `deckFluency` can be measured by the graders that exist. */
-export const MEASURABLE_THRESHOLDS = new Set(['deckFluency']);
+/**
+ * The threshold types this build can measure, which is exactly the types the
+ * graders that exist can produce (`grade/graders.ts`): `set` grades the decks
+ * and the ear deck, `sequence` grades the timed runs. The other seven shapes in
+ * architecture.md section 7 report "not built yet" rather than 0%, because a
+ * node reading 0% looks like failure and a node with no grader is not being
+ * failed at.
+ *
+ * Adding a grader family means adding its threshold type here. The two lists
+ * only make sense together.
+ */
+export const MEASURABLE_THRESHOLDS = new Set(['deckFluency', 'timedRun', 'earDeck']);
 
 export type Lifecycle = 'locked' | 'unlocked' | 'learning' | 'complete';
 
@@ -53,6 +64,8 @@ export interface NodeProgress {
   mastery: number;
   /** Share of items whose `latEMA` is under the automatic band. */
   automaticShare: number;
+  /** `earDeck` nodes only: the rolling window their threshold is read from. */
+  window: RepWindow | null;
   complete: boolean;
   decayed: boolean;
   lifecycle: Lifecycle;
@@ -64,29 +77,64 @@ export interface NodeProgress {
   missingRequires: string[];
 }
 
+/** section 1.2's "last N reps all correct". N is 3 unless a threshold says more. */
+function lastRepsCorrect(state: ItemState, n: number): boolean {
+  const recent = state.history.slice(-n);
+  return recent.length >= n && recent.every((h) => h.correct);
+}
+
 /**
  * One item, against one node's threshold (section 1.2):
  * "last 3 reps all correct AND accEMA >= node accuracy AND latEMA inside the
- * node's latency target (deckFluency: latEMA < 1200ms)".
+ * node's latency/tempo target (deckFluency: latEMA < 1200ms; timedRun/legato/
+ * sync: last pass met the numeric threshold)".
  *
  * `minRepsPerItem` is folded in here rather than left to the node. It is a
  * per-item field of the threshold (architecture.md section 7) and it exists to
  * stop three lucky reps counting as proof, which is a statement about an item.
+ *
+ * Three shapes, and the two new ones each needed a reading.
+ *
+ * **`timedRun` has no accuracy EMA to test.** Its `noteAccuracy: 1.0` is a
+ * per-rep rule ("all notes matched", architecture.md section 7) and the grader
+ * has already applied it: a rep is `correct` only if every note landed and the
+ * timing stats were under the maxima. Reading 1.0 as an `accEMA` threshold
+ * instead would make mastery unreachable, since an EMA that has ever seen a miss
+ * never returns to 1. So the item's bar is `cleanPasses` consecutive clean
+ * passes, which is section 1.2's "last N reps all correct" with N from the tree.
+ *
+ * **`earDeck`'s latency target is its own.** The 1200ms automatic band is a
+ * keyboard-recall number and this deck's target is `medianResponseMsMax`, which
+ * is 2500ms because the answer follows a sound the user had to hear first.
  */
 export function itemMastered(
   state: ItemState,
   node: TreeNode,
   bands: LatencyBands = LATENCY_BANDS
 ): boolean {
-  const deck = deckFluencyOf(node.id);
-  if (!deck) return false;
   if (state.status === 'suspended') return false;
-  if (state.reps < deck.minRepsPerItem) return false;
 
-  const lastThree = state.history.slice(-3);
-  if (lastThree.length < 3 || !lastThree.every((h) => h.correct)) return false;
-  if (state.accEMA < deck.accuracy) return false;
-  return hasLatency(state) && state.latEMA < bands.automaticMs;
+  const deck = deckFluencyOf(node.id);
+  if (deck) {
+    if (state.reps < deck.minRepsPerItem) return false;
+    if (!lastRepsCorrect(state, 3)) return false;
+    if (state.accEMA < deck.accuracy) return false;
+    return hasLatency(state) && state.latEMA < bands.automaticMs;
+  }
+
+  const timed = timedRunOf(node.id);
+  if (timed) {
+    return state.reps >= timed.cleanPasses && lastRepsCorrect(state, timed.cleanPasses);
+  }
+
+  const ear = earDeckOf(node.id);
+  if (ear) {
+    if (!lastRepsCorrect(state, 3)) return false;
+    if (state.accEMA < ear.accuracy) return false;
+    return hasLatency(state) && state.latEMA <= ear.medianResponseMsMax;
+  }
+
+  return false;
 }
 
 /** An item counts toward the automatic share once it has a latency under the band. */
@@ -97,12 +145,62 @@ export function itemAutomatic(
   return hasLatency(state) && state.latEMA < bands.automaticMs;
 }
 
+/**
+ * A node's last few reps, for the one threshold shape that is judged over a
+ * window rather than per item (architecture.md section 7, `earDeck`: "answer
+ * matches; rolling window").
+ */
+export interface RepWindow {
+  /** Reps in the window, capped at the threshold's `windowItems`. */
+  reps: number;
+  accuracy: number;
+  /** Median response time over the correct reps, or null before there are any. */
+  medianMs: number | null;
+}
+
+/**
+ * The window an `earDeck` node is judged over.
+ *
+ * The median is taken over **correct** reps, for the reason `summarise()` and
+ * `applyRating` already take latency that way: the time spent playing a wrong
+ * note measures nothing, and a fast wrong answer would pull the median down.
+ * That is a stricter reading than "median response time" alone, and the strict
+ * reading is the one that cannot be gamed by answering quickly and badly.
+ */
+export function repWindow(
+  nodeId: string,
+  reps: readonly RepRow[],
+  windowItems: number
+): RepWindow {
+  const mine: RepRow[] = [];
+  for (let i = reps.length - 1; i >= 0 && mine.length < windowItems; i -= 1) {
+    const row = reps[i]!;
+    if (row.nodeIds.includes(nodeId)) mine.push(row);
+  }
+  const correct = mine.filter((r) => r.correct);
+  const latencies = correct
+    .map((r) => r.latencyMs)
+    .filter((l): l is number => l !== null && l > 0);
+
+  return {
+    reps: mine.length,
+    accuracy: mine.length === 0 ? 0 : correct.length / mine.length,
+    medianMs: latencies.length > 0 ? median(latencies) : null,
+  };
+}
+
 export interface ProgressOptions {
   bands?: LatencyBands;
   /** Node ids stamped complete at some point in the past. */
   completedAt?: Readonly<Record<string, number>>;
   /** `requires` flags the user has satisfied. `hasPedal` fills `pedal`. */
   satisfiedRequires?: readonly string[];
+  /**
+   * Recent reps, oldest first, for `earDeck`'s rolling window. Everything else
+   * is a function of item state alone; without these an ear node simply reports
+   * an empty window and cannot complete.
+   */
+  reps?: readonly RepRow[];
 }
 
 /**
@@ -119,6 +217,7 @@ export function nodeProgress(
   const bands = opts.bands ?? LATENCY_BANDS;
   const completedAt = opts.completedAt ?? {};
   const satisfied = new Set(opts.satisfiedRequires ?? []);
+  const reps = opts.reps ?? [];
 
   const out = new Map<string, NodeProgress>();
 
@@ -151,14 +250,21 @@ export function nodeProgress(
     const mastery = itemCount === 0 ? 0 : mastered / itemCount;
     const automaticShare = itemCount === 0 ? 0 : automatic / itemCount;
 
-    const deck = deckFluencyOf(node.id);
+    const ear = earDeckOf(node.id);
+    const window = ear ? repWindow(node.id, reps, ear.windowItems) : null;
     const thresholdMet =
       measurable &&
       drillable &&
-      deck !== null &&
+      // Never complete on a partial pool: a node is not finished because only
+      // some of the items the curriculum declares have been built.
       items.length >= itemCount &&
-      minReps >= deck.minRepsPerItem &&
-      automaticShare >= deck.automaticShare;
+      nodeThresholdMet(node, {
+        minReps,
+        automaticShare,
+        mastered,
+        itemCount,
+        window,
+      });
 
     const complete = thresholdMet || completedAt[node.id] !== undefined;
 
@@ -173,6 +279,7 @@ export function nodeProgress(
       mastered,
       mastery,
       automaticShare,
+      window,
       complete,
       decayed: complete && mastery < DECAY_MASTERY,
       lifecycle: 'locked',
@@ -199,21 +306,73 @@ export function nodeProgress(
 }
 
 /**
+ * Has this node's threshold been met, per its type (section 1.2:
+ * "nodeComplete(node) := threshold met per its type")?
+ *
+ * The three shapes read differently on purpose, because the documents define
+ * them differently:
+ *
+ *  - `deckFluency`: `automaticShare` of the declared items under the automatic
+ *    band, with every item having had at least `minRepsPerItem` reps.
+ *  - `timedRun`: section 1.2 spells this one out as "cleanPasses recorded for
+ *    every item", and `itemMastered` is already exactly that per item, so the
+ *    node is complete when all of them are.
+ *  - `earDeck`: a rolling window, not a per-item count. A full window at or
+ *    above the accuracy, with a median response at or under the maximum.
+ */
+function nodeThresholdMet(
+  node: TreeNode,
+  stats: {
+    minReps: number;
+    automaticShare: number;
+    mastered: number;
+    itemCount: number;
+    window: RepWindow | null;
+  }
+): boolean {
+  const deck = deckFluencyOf(node.id);
+  if (deck) {
+    return (
+      stats.minReps >= deck.minRepsPerItem && stats.automaticShare >= deck.automaticShare
+    );
+  }
+
+  const timed = timedRunOf(node.id);
+  if (timed) return stats.itemCount > 0 && stats.mastered >= stats.itemCount;
+
+  const ear = earDeckOf(node.id);
+  if (ear) {
+    const w = stats.window;
+    return (
+      w !== null &&
+      w.reps >= ear.windowItems &&
+      w.accuracy >= ear.accuracy &&
+      w.medianMs !== null &&
+      w.medianMs <= ear.medianResponseMsMax
+    );
+  }
+
+  return false;
+}
+
+/**
  * Which deps are still holding a node shut.
  *
- * **A dep nothing can practise does not gate.** Section 1.3's rule is "every
- * dep at nodeMastery >= 0.80", which assumes every node has a drill. Three of
- * the four V1 keyboard-theory nodes sit behind `kt-geography`, whose drill is
- * slice 6, so the literal rule leaves the day-one queue empty with 72
- * practisable triads sitting unreachable behind it. That is the exact failure
- * the tree's own `v1Patch` was written to fix ("every V1 node sat behind a
- * non-V1 root gate, so the unlock rule left the day-one queue empty"), arriving
- * again for a different reason.
+ * **A dep nothing can practise does not gate.** Section 1.3's rule is "every dep
+ * at nodeMastery >= 0.80", which assumes every node has a drill. Slice 5 shipped
+ * with three of the four V1 keyboard-theory nodes behind `kt-geography`, whose
+ * drill did not exist yet, so the literal rule left the day-one queue empty with
+ * 72 practisable triads unreachable behind it. That was the exact failure the
+ * tree's own `v1Patch` was written to fix ("every V1 node sat behind a non-V1
+ * root gate, so the unlock rule left the day-one queue empty"), arriving again
+ * for a different reason.
  *
- * So an undrillable dep is bypassed and **named** in `bypassedDeps`, which the
- * progress screen shows. The bypass disappears on its own as the missing drills
- * land: the moment `kt-geography` has items, it gates again like any other dep.
- * A dep that is drillable and merely unmastered still gates, exactly as written.
+ * The bypass named the deps it skipped in `bypassedDeps`, which the progress
+ * screen shows, and it was written to expire by itself. **Slice 6 expired it**:
+ * `note-find` gives `kt-geography` items, so it gates like any other dep and the
+ * first thing a new install practises is the keyboard-geography deck. The rule
+ * stays because the tree has 53 nodes and 4 drills, and because the shape of the
+ * failure it prevents does not go away until the last one is built.
  */
 export function unlockStatus(
   node: TreeNode,

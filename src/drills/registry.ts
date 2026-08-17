@@ -17,6 +17,9 @@
  */
 
 import { INVERSION_TRAINER_ID, inversionTrainer } from './inversionTrainer.ts';
+import { NOTE_FIND_ID, noteFind } from './noteFind.ts';
+import { RHYTHM_TAP_ID, rhythmTap } from './rhythmTap.ts';
+import { EAR_ID, earId } from './earId.ts';
 import { buildItems } from './pool.ts';
 import type { DrillItem, DrillParams, DrillTemplate } from './types.ts';
 
@@ -29,8 +32,15 @@ import type { DrillItem, DrillParams, DrillTemplate } from './types.ts';
  */
 export type AnyDrillTemplate = DrillTemplate<DrillParams>;
 
+/**
+ * Registration order is the order decks are offered in, so it follows the tree:
+ * the gate first, then what it opens.
+ */
 export const DRILLS: Record<string, AnyDrillTemplate> = {
+  [NOTE_FIND_ID]: noteFind as unknown as AnyDrillTemplate,
   [INVERSION_TRAINER_ID]: inversionTrainer as unknown as AnyDrillTemplate,
+  [RHYTHM_TAP_ID]: rhythmTap as unknown as AnyDrillTemplate,
+  [EAR_ID]: earId as unknown as AnyDrillTemplate,
 };
 
 export function drillFor(id: string): AnyDrillTemplate {
