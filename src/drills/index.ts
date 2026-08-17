@@ -18,11 +18,14 @@ export {
   DEFAULT_DECK,
   DEFAULT_DWELL_MS,
   practice,
+  scheduledPool,
   summarise,
   usePractice,
 } from './practice.ts';
 export type {
   ItemStats,
+  PracticeEnd,
+  PracticeMode,
   PracticeRep,
   PracticeStats,
   PracticeStatus,

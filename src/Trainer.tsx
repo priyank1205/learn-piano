@@ -7,11 +7,11 @@
  * prompt, gets out of the way, or reports latency. There is no mouse in the
  * loop: a correct answer advances by itself and space covers everything else.
  *
- * What this is not, yet: the deck is chosen by hand and nothing is saved, so
- * there is no spaced repetition, no due date and no mastery. Those need the
- * store, which is the next slice. The order inside a session is a shuffled
- * cycle with missed items requeued, which is the part of session-generator.md
- * that does not need history to exist.
+ * Two ways in. **Today's session** is the scheduler: the active set picks the
+ * nodes, spaced repetition picks the items, and softmax picks the order. **Free
+ * practice** is a deck chosen by hand in a shuffled cycle, which is what slice 4
+ * built and is still the right thing when the user wants to hammer one deck.
+ * Both persist, and both feed the same SRS.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -24,7 +24,8 @@ import {
   templateForItem,
   usePractice,
 } from './drills/index.ts';
-import type { DrillItem, PracticeRep, PromptView } from './drills/index.ts';
+import type { DrillItem, PracticeMode, PracticeRep, PromptView } from './drills/index.ts';
+import { store, useProgressStore } from './store/index.ts';
 import {
   LATENCY_BANDS,
   latencyBand,
@@ -85,10 +86,12 @@ function PromptCard({
   item,
   view,
   last,
+  idleHint,
 }: {
   item: DrillItem | null;
   view: PromptView | null;
   last: PracticeRep | null;
+  idleHint: React.ReactNode;
 }) {
   const r = useGradeRunner();
   const graded = r.state === 'answered' && last !== null && last.item === item;
@@ -98,9 +101,7 @@ function PromptCard({
   if (!item || !view) {
     return (
       <div className="prompt-card idle">
-        <p className="muted">
-          Pick a deck and press <kbd>space</kbd> to start.
-        </p>
+        <p className="muted">{idleHint}</p>
       </div>
     );
   }
@@ -202,13 +203,13 @@ function SessionPanel({
             </div>
           </div>
           <p className="note muted">
-            Automatic share is over correct reps only.
+            Automatic share is over correct reps only, and over this session only.
             {target !== null && (
               <>
                 {' '}
                 The tree calls this deck complete at {Math.round(target * 100)}% of items
-                under {LATENCY_BANDS.automaticMs}ms, sustained, which needs the history
-                the store slice will keep.
+                under {LATENCY_BANDS.automaticMs}ms sustained across sessions, which is
+                the number on <a href="#/progress">progress</a>.
               </>
             )}
           </p>
@@ -295,14 +296,41 @@ function HistoryPanel({ reps }: { reps: readonly PracticeRep[] }) {
   );
 }
 
+/**
+ * Why the current item is on screen. Small, and next to the prompt rather than
+ * in a panel: the one question a scheduler has to be able to answer at any
+ * moment is "why this?", and an app that cannot answer it stops being trusted.
+ */
+function ReasonTag({ reason }: { reason: string | null }) {
+  if (!reason) return null;
+  const text =
+    reason === 'new'
+      ? 'new item'
+      : reason === 'learning'
+        ? 'still learning'
+        : 'due for review';
+  return <span className={`reason ${reason}`}>{text}</span>;
+}
+
 export default function TrainerScreen() {
   const p = usePractice();
   const r = useGradeRunner();
   const audio = useAudioSession();
   const midiState = useMidiState();
+  const s = useProgressStore();
 
+  const [mode, setMode] = useState<PracticeMode>('scheduled');
   const [deck, setDeck] = useState<readonly string[]>(practice.nodeIds);
   const running = p.status === 'running';
+
+  useEffect(() => {
+    void store.load();
+  }, []);
+
+  const begin = useCallback(() => {
+    if (mode === 'scheduled') void practice.startScheduled();
+    else void practice.start(deck);
+  }, [mode, deck]);
   const item = p.current;
   const view = useMemo(
     () => (item ? templateForItem(item).view(item.params) : null),
@@ -325,7 +353,7 @@ export default function TrainerScreen() {
    */
   const advance = useCallback(() => {
     if (!running) {
-      practice.start(deck);
+      begin();
       return;
     }
     if (r.state === 'waiting') {
@@ -334,7 +362,7 @@ export default function TrainerScreen() {
       return;
     }
     practice.next();
-  }, [running, deck, r.state]);
+  }, [running, begin, r.state]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -372,23 +400,89 @@ export default function TrainerScreen() {
         </div>
       )}
 
+      {p.returnMode !== 'normal' && running && p.mode === 'scheduled' && (
+        <div className="banner">
+          <div>
+            {p.returnMode === 're-entry' ? (
+              <>
+                <strong>Re-entry session.</strong> Ten minutes, your strongest items only,
+                nothing new. The point of coming back is coming back.
+              </>
+            ) : (
+              <>
+                <strong>Easing back in.</strong> Shorter session, no new material today.
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="toolbar">
-        <DeckPicker selected={deck} onChange={setDeck} disabled={running} />
+        <div className="segmented">
+          <button
+            className={mode === 'scheduled' ? 'active' : undefined}
+            disabled={running}
+            onClick={() => setMode('scheduled')}
+            title="The scheduler picks: what is due, in softmax order, with new items from the daily faucet."
+          >
+            Today&apos;s session
+          </button>
+          <button
+            className={mode === 'free' ? 'active' : undefined}
+            disabled={running}
+            onClick={() => setMode('free')}
+            title="A deck you pick, in a shuffled cycle. Still logged, still schedules."
+          >
+            Free practice
+          </button>
+        </div>
         <span className="grow" />
         {running ? (
           <button onClick={() => practice.end()}>End session</button>
         ) : (
           <button
             className="primary"
-            onClick={() => practice.start(deck)}
-            disabled={deck.length === 0}
+            onClick={begin}
+            disabled={p.status === 'starting' || (mode === 'free' && deck.length === 0)}
           >
-            Start
+            {p.status === 'starting' ? 'starting...' : 'Start'}
           </button>
         )}
       </div>
 
-      <PromptCard item={item} view={view} last={graded ? last : null} />
+      {mode === 'free' && (
+        <div className="toolbar">
+          <DeckPicker selected={deck} onChange={setDeck} disabled={running} />
+        </div>
+      )}
+
+      {p.endedBecause === 'exhausted' && (
+        <div className="banner ok">
+          <div>
+            <strong>That is everything due today.</strong> The rest comes back on its own
+            date, and the new-item faucet refills tomorrow. Nothing is owed and nothing is
+            behind. Free practice is there if you want more.
+          </div>
+        </div>
+      )}
+
+      <PromptCard
+        item={item}
+        view={view}
+        last={graded ? last : null}
+        idleHint={
+          mode === 'scheduled' ? (
+            <>
+              Press <kbd>space</kbd> for today&apos;s session.
+            </>
+          ) : (
+            <>
+              Pick a deck and press <kbd>space</kbd> to start.
+            </>
+          )
+        }
+      />
+      {running && p.mode === 'scheduled' && <ReasonTag reason={p.reason} />}
 
       {missed && last && view && (
         <div className="miss-card">
@@ -436,9 +530,13 @@ export default function TrainerScreen() {
         </label>
         <span className="grow" />
         <span className="muted">
-          {running
-            ? `${p.remainingInPass} left of ${p.deckSize} this pass`
-            : `${pending} items selected`}
+          {running && p.mode === 'scheduled'
+            ? `${p.dueCount} due, ${p.newItemsLeft} new left`
+            : running
+              ? `${p.remainingInPass} left of ${p.deckSize} this pass`
+              : mode === 'free'
+                ? `${pending} items selected`
+                : `${s.dueNow()} due, ${s.newItemsLeftToday()} new left today`}
         </span>
       </div>
 
@@ -451,9 +549,10 @@ export default function TrainerScreen() {
       <p className="note muted">
         Latency runs from the prompt being painted to the last note of the chord going
         down, both read from MIDI timestamps, so a slow frame cannot flatter or spoil a
-        number. Any octave counts; the bass note does not. Missed items come back later in
-        the same session. Nothing is saved: reps last until the page reloads, which is
-        what the store slice fixes.
+        number. Any octave counts; the bass note does not. Correctness only decides
+        whether the latency counts: under 1.2s schedules the item further out than 4s
+        does, even though both are right. Everything here is saved, and{' '}
+        <a href="#/progress">progress</a> is where it adds up.
       </p>
     </div>
   );

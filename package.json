@@ -19,6 +19,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "localforage": "^1.10.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tonal": "^6.4.3",

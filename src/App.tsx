@@ -8,11 +8,14 @@ import Inspector from './Inspector.tsx';
 import AudioScreen from './Audio.tsx';
 import GraderScreen from './Grader.tsx';
 import TrainerScreen from './Trainer.tsx';
+import ProgressScreen from './Progress.tsx';
 import { audio, session, useAudioSession } from './audio/index.ts';
+import { store } from './store/index.ts';
 
 const ROUTES = [
   { path: '/', label: 'Home' },
   { path: '/train', label: 'Inversion trainer' },
+  { path: '/progress', label: 'Progress' },
   { path: '/grader', label: 'Grader bench' },
   { path: '/audio', label: 'Audio out' },
   { path: '/inspector', label: 'MIDI inspector' },
@@ -63,35 +66,32 @@ function AudioControl() {
 function Home() {
   return (
     <div className="home">
-      <h2>Slice 4: the drill schema and the inversion trainer</h2>
+      <h2>Slice 5: the progress store and the scheduler</h2>
       <p>
-        The <a href="#/train">inversion trainer</a> is the first screen here that is for
-        practising rather than for proving something works. Pick a deck, press space, and
-        it prompts triads by symbol until you stop: a correct answer advances by itself, a
-        miss shows the notes and comes back later in the same session. Latency is the
-        score. Correctness only decides whether the latency counts.
+        Practice now outlives the page. Every rep goes to IndexedDB, spaced repetition
+        runs on it, and <a href="#/progress">progress</a> counts{' '}
+        <strong>sessions per week</strong>, which is the only number that matters for the
+        next fortnight: five or more says the design is holding, three or fewer says make
+        the sessions shorter rather than tune anything.
       </p>
       <p>
-        Drills are data. The trainer contains no chords: it renders whatever the{' '}
-        <code>DrillTemplate</code> hands it, and the 72 items are the cartesian product of
-        that template&apos;s param space, each with a stable hashed id so the store slice
-        can key spaced repetition on it. A second drill is a second template, not an edit
-        to this screen.
+        <a href="#/train">Today&apos;s session</a> is the scheduler doing the choosing.
+        Correctness gates and latency grades, so an answer under 1.2 seconds pushes the
+        item further out than a correct answer at four seconds does. Order is
+        softmax-sampled rather than sorted, missed items come back after three to six
+        others, and a gap of a few days makes the next session smaller instead of
+        presenting a wall. Free practice is still there for hammering one deck by hand.
       </p>
       <p>
-        The <a href="#/grader">grader bench</a> is still the place to watch one rep being
-        decided, with the chord window and the settle window exposed. It now builds its
-        prompts from the same template the trainer runs, so the two cannot disagree about
-        what a chord is.
-      </p>
-      <p>
-        The <a href="#/audio">audio screen</a> owns the piano and the clock offset, and
-        the <a href="#/inspector">MIDI inspector</a> is still the ground truth when a
-        grade looks wrong.
+        The <a href="#/grader">grader bench</a> is the place to watch one rep being
+        decided, with the chord window and the settle window exposed. The{' '}
+        <a href="#/audio">audio screen</a> owns the piano and the clock offset, and the{' '}
+        <a href="#/inspector">MIDI inspector</a> is still the ground truth when a grade
+        looks wrong.
       </p>
       <p className="muted">
-        Nothing is saved yet. Spaced repetition, mastery and sessions per week arrive with
-        the store slice.
+        There is no server and no sync. Export a backup from the progress screen now and
+        then: a file in Downloads is the whole recovery plan.
       </p>
     </div>
   );
@@ -99,6 +99,12 @@ function Home() {
 
 export default function App() {
   const route = useHashRoute();
+
+  // Opened once for the whole app rather than per screen, so the first render
+  // of any route already knows whether there is history.
+  useEffect(() => {
+    void store.load();
+  }, []);
 
   return (
     <div className="app">
@@ -126,6 +132,8 @@ export default function App() {
           <GraderScreen />
         ) : route === '/train' ? (
           <TrainerScreen />
+        ) : route === '/progress' ? (
+          <ProgressScreen />
         ) : (
           <Home />
         )}

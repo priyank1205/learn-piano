@@ -16,11 +16,15 @@
  * pause is for looking at the answer, and the item comes back later in the same
  * session (queue.ts) to find out whether the look worked.
  *
- * **Nothing here persists.** Reps live until the page reloads. `summary()`
- * returns the shape architecture.md section 8 wants in `sessionLog`, so the
- * store slice writes it rather than inventing it. Sessions per week is the
- * metric that decides whether any of the rest matters (CLAUDE.md), and it
- * cannot be counted until that store exists.
+ * **Two modes, one loop.** In `scheduled` mode what comes next is the softmax
+ * selection of session-generator.md section 4, over the items that are actually
+ * due. In `free` mode the user has picked decks by hand and gets the shuffled
+ * cycle of `queue.ts`, which is right for a deck and wrong for a due pool.
+ *
+ * Reps persist in both. A deliberately drilled item is a real rep whichever way
+ * it was chosen, and it updates the schedule identically. (The one thing that
+ * does not is section 8's free-play HUD harvest, which is passive telemetry,
+ * updates `latEMA` only, and does not exist yet.)
  */
 
 import { useSyncExternalStore } from 'react';
@@ -30,7 +34,11 @@ import { median } from '../stats.ts';
 import { ItemQueue } from './queue.ts';
 import { instantiate } from './types.ts';
 import type { DrillItem } from './types.ts';
-import { itemsForNodes, templateForItem } from './registry.ts';
+import { itemById, itemsForNodes, templateForItem } from './registry.ts';
+import { store } from '../store/store.ts';
+import type { ReturnMode } from '../store/types.ts';
+import { SessionPlanner, deriveProgress } from '../schedule/index.ts';
+import type { NodeProgress, PlannedItem } from '../schedule/index.ts';
 
 /** The core V1 target: major triads, all three inversions (skill-tree.json). */
 export const DEFAULT_DECK: readonly string[] = ['kt-inv-maj-triads'];
@@ -48,11 +56,16 @@ export interface PracticeRep {
   rep: Rep;
 }
 
-/** The `sessionLog` row this session will become once there is a store. */
+/**
+ * The `sessionLog` row this session becomes. The store writes this shape rather
+ * than inventing one; `SessionRow` adds only the fields the store owns (its id,
+ * the return mode, the rolling accuracy across sessions).
+ */
 export interface PracticeSummary {
   startedAt: number;
   endedAt: number | null;
   durationMs: number;
+  mode: PracticeMode;
   nodeIds: readonly string[];
   reps: number;
   correct: number;
@@ -133,10 +146,43 @@ function rank(s: ItemStats): number {
   return s.medianLatencyMs ?? 0;
 }
 
-export type PracticeStatus = 'idle' | 'running';
+export type PracticeStatus = 'idle' | 'starting' | 'running';
+
+export type PracticeMode = 'scheduled' | 'free';
+
+/**
+ * Why the loop stopped handing out items. `exhausted` is a real, healthy state
+ * and the screen says so plainly: the due pool is a set of dates and the new
+ * item faucet is a daily allowance, so "nothing more today" is the scheduler
+ * working rather than the app breaking.
+ */
+export type PracticeEnd = 'exhausted' | 'ended' | null;
+
+/**
+ * The pool a scheduled session draws from: every item of every node in play,
+ * plus every item that already has state.
+ *
+ * The second half is what keeps section 1.3's promise that a completed node's
+ * items "stay in SRS forever". A node that leaves the active set by completing
+ * would otherwise take its whole deck out of circulation, and the first thing
+ * the user would notice is the material he has just mastered rotting.
+ */
+export function scheduledPool(
+  activeNodeIds: readonly string[],
+  stateIds: Iterable<string>
+): DrillItem[] {
+  const seen = new Map<string, DrillItem>();
+  for (const item of itemsForNodes(activeNodeIds)) seen.set(item.itemId, item);
+  for (const itemId of stateIds) {
+    const item = itemById(itemId);
+    if (item) seen.set(item.itemId, item);
+  }
+  return [...seen.values()];
+}
 
 class Practice {
   status: PracticeStatus = 'idle';
+  mode: PracticeMode = 'scheduled';
   nodeIds: readonly string[] = DEFAULT_DECK;
   current: DrillItem | null = null;
   reps: readonly PracticeRep[] = [];
@@ -144,6 +190,15 @@ class Practice {
   dwellMs = DEFAULT_DWELL_MS;
   startedAt: number | null = null;
   endedAt: number | null = null;
+  endedBecause: PracticeEnd = null;
+
+  /** Scheduled mode only. Null in free practice. */
+  planner: SessionPlanner | null = null;
+  active: readonly NodeProgress[] = [];
+  returnMode: ReturnMode = 'normal';
+  budgetMin: number | null = null;
+  /** Why the current item was chosen, for the scheduler panel. */
+  reason: PlannedItem['reason'] | null = null;
 
   private queue: ItemQueue | null = null;
   private unsubscribeRunner: (() => void) | null = null;
@@ -169,12 +224,22 @@ class Practice {
   }
 
   get deckSize(): number {
-    return this.queue?.deck.length ?? 0;
+    return this.queue?.deck.length ?? this.planner?.dueCount ?? 0;
   }
 
   /** Items left before every item in the deck has been seen this pass. */
   get remainingInPass(): number {
     return this.queue?.remaining ?? 0;
+  }
+
+  /** Due items the planner was allowed to serve, after backlog compression. */
+  get dueCount(): number {
+    return this.planner?.dueCount ?? 0;
+  }
+
+  /** New items this session may still introduce, from the daily faucet. */
+  get newItemsLeft(): number {
+    return this.planner?.newItemsLeft ?? 0;
   }
 
   setAutoAdvance(on: boolean): void {
@@ -188,7 +253,11 @@ class Practice {
     this.bump();
   }
 
-  start(nodeIds: readonly string[] = this.nodeIds): void {
+  /**
+   * Free practice: a deck chosen by hand, in a shuffled cycle. Still logged,
+   * still schedules; only the choice of what comes next is the user's.
+   */
+  async start(nodeIds: readonly string[] = this.nodeIds): Promise<void> {
     this.teardown();
     const deck = itemsForNodes(nodeIds);
     this.nodeIds = [...nodeIds];
@@ -197,11 +266,86 @@ class Practice {
       this.bump();
       return;
     }
+    this.status = 'starting';
+    this.mode = 'free';
+    this.planner = null;
     this.queue = new ItemQueue(deck);
+    this.budgetMin = null;
+    this.bump();
+
+    await store.load();
+    await store.startSession({ mode: 'free', nodeIds, budgetMin: null });
+    this.begin();
+  }
+
+  /**
+   * A scheduled session: the active set decides which nodes are in play, the
+   * SRS decides which of their items are due, and softmax decides the order.
+   */
+  async startScheduled(budgetMin?: number): Promise<void> {
+    this.teardown();
+    this.status = 'starting';
+    this.mode = 'scheduled';
+    this.queue = null;
+    this.bump();
+
+    await store.load();
+    const now = Date.now();
+    const { progress, active } = deriveProgress(store.itemState, {
+      bands: store.settings.latencyBandsMs,
+      completedAt: store.completedAt,
+      satisfiedRequires: store.settings.hasPedal ? ['pedal'] : [],
+    });
+
+    const nodeIds = active.map((a) => a.nodeId);
+    const returnMode = store.returnModeNow(now);
+    // section 7: a gap auto-presets the shorter session. The return session is
+    // meant to be the easiest one there is, and the budget is half of that.
+    const budget =
+      budgetMin ??
+      (returnMode === 'normal'
+        ? store.defaultBudgetMin(now)
+        : store.settings.lateBudgetMin);
+
+    const planner = new SessionPlanner({
+      now,
+      pool: scheduledPool(nodeIds, store.itemState.keys()),
+      states: store.itemState,
+      progress,
+      returnMode,
+      budgetMin: budget,
+      temperature: store.settings.selectionTemperature,
+      newItemsAllowed: store.newItemsLeftToday(now),
+      rollingAccuracy: store.rollingAccuracy(),
+      yesterdayAccuracy: store.yesterdayAccuracy(now),
+    });
+
+    // The backlog compressor pushed these out. Written before the session
+    // starts, silently, with no penalty and nothing on screen (section 7).
+    await store.putItemStates(planner.postponed);
+
+    this.planner = planner;
+    this.active = active;
+    this.returnMode = returnMode;
+    this.budgetMin = budget;
+    this.nodeIds = nodeIds;
+
+    await store.startSession({
+      mode: 'scheduled',
+      nodeIds,
+      budgetMin: budget,
+      returnMode,
+      now,
+    });
+    this.begin();
+  }
+
+  private begin(): void {
     this.reps = [];
     this.lastRecorded = null;
     this.startedAt = Date.now();
     this.endedAt = null;
+    this.endedBecause = null;
     this.status = 'running';
     // Subscribed only while a session runs, so reps taken on the grader bench
     // can never land in a practice log.
@@ -210,23 +354,46 @@ class Practice {
   }
 
   /** End the session. Reps and the summary stay on screen. */
-  end(): void {
+  end(why: Exclude<PracticeEnd, null> = 'ended'): void {
     if (this.status === 'idle') return;
     this.teardown();
     this.endedAt = Date.now();
+    this.endedBecause = why;
     this.status = 'idle';
     this.current = null;
+    this.reason = null;
+    void this.closeSession();
     this.bump();
   }
 
+  /**
+   * Close the row and stamp any node that reached its threshold during the
+   * session. Section 1.3's "threshold met once" is the single bit of the
+   * derived layer that is not a function of the present state, so it is the
+   * single bit that gets written down.
+   */
+  private async closeSession(): Promise<void> {
+    await store.endSession();
+    const { progress } = deriveProgress(store.itemState, {
+      bands: store.settings.latencyBandsMs,
+      completedAt: store.completedAt,
+      satisfiedRequires: store.settings.hasPedal ? ['pedal'] : [],
+    });
+    const met = [...progress.values()].filter((p) => p.complete).map((p) => p.nodeId);
+    await store.markComplete(met);
+  }
+
   next(): void {
-    if (this.status !== 'running' || !this.queue) return;
+    if (this.status !== 'running') return;
     this.cancelAdvance();
-    const item = this.queue.next();
+
+    const planned = this.planner ? this.planner.next() : null;
+    const item = this.planner ? (planned?.item ?? null) : (this.queue?.next() ?? null);
     if (!item) {
-      this.end();
+      this.end(this.planner ? 'exhausted' : 'ended');
       return;
     }
+    this.reason = planned?.reason ?? null;
     this.current = item;
     runner.arm(instantiate(templateForItem(item), item));
     this.bump();
@@ -239,6 +406,7 @@ class Practice {
       startedAt,
       endedAt,
       durationMs: startedAt === 0 ? 0 : (endedAt ?? Date.now()) - startedAt,
+      mode: this.mode,
       nodeIds: this.nodeIds,
       reps: this.reps.length,
       correct: this.reps.filter((r) => r.rep.result.correct).length,
@@ -260,14 +428,35 @@ class Practice {
 
     this.lastRecorded = rep;
     this.reps = [...this.reps, { item, rep }];
+    this.bump();
+    void this.persist(item, rep);
+  }
 
-    if (rep.result.correct) {
-      if (this.autoAdvance) this.scheduleAdvance();
-    } else {
-      // session-generator.md section 2: an `again` comes back this session,
-      // after 3 to 6 other items.
+  /**
+   * Write the rep, then act on it.
+   *
+   * The order matters in one direction only: the planner's in-session re-queue
+   * and the next selection both read state the store has just written, so
+   * advancing before the write resolves would sample from a stale due pool and
+   * could hand back the item that was just answered. The dwell is started after
+   * the await for the same reason, which delays the next prompt by the length
+   * of one IndexedDB write and changes no measurement: latency is timestamped
+   * from the paint of the prompt, not from here.
+   */
+  private async persist(item: DrillItem, rep: Rep): Promise<void> {
+    const { row } = await store.recordRep({ item, rep });
+
+    if (this.planner) {
+      this.planner.record(item.itemId, row.rating);
+    } else if (!rep.result.correct) {
+      // Free practice keeps the same rule through the deck's own queue
+      // (section 2: an `again` comes back this session, after 3 to 6 others).
       this.queue?.requeue(item);
     }
+
+    // A superseded rep must not advance a loop that has moved on or stopped.
+    if (this.status !== 'running' || rep !== this.lastRecorded) return;
+    if (rep.result.correct && this.autoAdvance) this.scheduleAdvance();
     this.bump();
   }
 

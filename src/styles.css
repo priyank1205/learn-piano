@@ -852,3 +852,117 @@ button.deck.active {
 .band-text.not-known {
   color: var(--bad);
 }
+
+/* --- slice 5: the progress store and the scheduler ------------------------ */
+
+/*
+ * Sessions per week is the headline on the progress screen and it is sized to
+ * say so. The verdict colours are the thresholds of architecture.md section
+ * 9.6 made visible: >=5 holding, 4 watch, <=3 shrink the session.
+ */
+.counters .num.huge {
+  font-size: 2.6rem;
+  line-height: 1;
+}
+
+.counters .num.holding {
+  color: var(--ok);
+}
+
+.counters .num.watch {
+  color: var(--warn);
+}
+
+.counters .num.failing {
+  color: var(--bad);
+}
+
+.counters .num.unknown {
+  color: var(--fg);
+}
+
+.cc-table td.ok {
+  color: var(--ok);
+}
+
+/*
+ * The one column allowed to wrap. Everything else in a cc-table is a number or
+ * a label and reads better on one line, but these are sentences explaining why
+ * a node is where it is, and truncating the explanation defeats the point of
+ * showing it.
+ */
+.cc-table td.node-cell {
+  white-space: normal;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+.node-note {
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--dim);
+  max-width: 46ch;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.cc-table .progress {
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 5rem;
+  margin-right: 0.4rem;
+}
+
+.life {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.life.learning {
+  color: var(--accent);
+}
+
+.life.complete {
+  color: var(--ok);
+}
+
+.life.locked {
+  color: var(--dim);
+}
+
+.life .flag {
+  margin-left: 0.35rem;
+  color: var(--warn);
+}
+
+/*
+ * Why the current item is on screen. Deliberately quiet: it answers a question
+ * without competing with the prompt, which is the only thing that should pull
+ * the eye while the clock is running.
+ */
+.reason {
+  display: block;
+  text-align: center;
+  margin-top: -0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.reason.new {
+  color: var(--accent);
+}
+
+.reason.learning {
+  color: var(--warn);
+}
+
+.rep-list button {
+  margin-left: auto;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+}
