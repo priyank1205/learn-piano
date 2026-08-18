@@ -21,14 +21,24 @@
  *    of playback.
  *  - `expected.tempoBpm` present means timed, so a run of the metronome is
  *    started and its `gridStartMs` goes onto the spec.
+ *  - a node the tree marks `sustainSensitive` forces the app piano into dry
+ *    mode, because that is what makes the drill audible at all.
  *  - anything else is on screen when it is painted, which is what the runner
  *    already assumed.
+ *
+ * Slice 7 found the first real breach of "drills are data" in this file, and it
+ * is worth keeping the shape of it in mind. `withGrid` used to start the
+ * metronome for `PULSE_BEATS` beats, a constant belonging to the pulse drill,
+ * which was correct for exactly as long as there was one timed drill. The legato
+ * line is nine notes over four beats, so it would have been counted against a
+ * click that ran twice as long as the pattern. The grid a drill is played
+ * against has to come from that drill's own expected events, and now does.
  */
 
 import { runner } from '../grade/index.ts';
-import type { PendingPrompt } from '../grade/index.ts';
-import { session } from '../audio/index.ts';
-import { PULSE_BEATS, PULSE_COUNT_IN } from './rhythmTap.ts';
+import type { ExpectedPerformance, PendingPrompt, Tolerances } from '../grade/index.ts';
+import { COUNT_IN_BEATS, session } from '../audio/index.ts';
+import { nodeById } from '../tree.ts';
 import { instantiate } from './types.ts';
 import type { DrillItem, DrillParams, Rng } from './types.ts';
 import { templateForItem } from './registry.ts';
@@ -51,14 +61,29 @@ export function prepareItem<P extends DrillParams>(
   return { ...item, params: template.prepare(item.params, rng) as P };
 }
 
+export interface PresentOptions {
+  rng?: Rng;
+  /**
+   * Tolerance overrides from settings, merged over the template's own. This is
+   * how a number architecture.md section 9 expects to be wrong gets moved
+   * without editing a drill: the legato band is the first one to use it.
+   */
+  tolerances?: Partial<Tolerances>;
+}
+
 /**
  * Prepare an item, deliver its prompt, and arm the runner for it. Returns the
  * prepared item so the caller can show the same rep it just started.
  */
-export function presentItem(item: DrillItem, rng: Rng = Math.random): DrillItem {
-  const prepared = prepareItem(item, rng);
+export function presentItem(item: DrillItem, opts: PresentOptions = {}): DrillItem {
+  const prepared = prepareItem(item, opts.rng ?? Math.random);
   const template = templateForItem(prepared);
-  const prompt = instantiate(template, prepared);
+  const prompt = instantiate(template, prepared, opts.tolerances);
+
+  // Before anything sounds. architecture.md section 6: "Every `sustainSensitive:
+  // true` node MUST route playback through the app piano", and the app piano is
+  // only honest about separation in dry mode.
+  if (isSustainSensitive(prepared.nodeIds)) session.setMode('dry');
 
   if (template.promptMode === 'audio') {
     runner.arm(prompt, audioPresenter(template.view(prepared.params).audition));
@@ -72,6 +97,19 @@ export function presentItem(item: DrillItem, rng: Rng = Math.random): DrillItem 
 
   runner.arm(prompt);
   return prepared;
+}
+
+/**
+ * Does this item exercise a node whose skill is note separation?
+ *
+ * Read from the tree rather than from a list of drill ids, so the rule arrives
+ * with the node instead of with the drill: eleven of the tree's nodes are marked
+ * `sustainSensitive` and only one of them is in V1
+ * (`AudioOut.SUSTAIN_SENSITIVE_V1_NODE`, which names it for grepping). The other
+ * ten get the same treatment for free on the day they get a drill.
+ */
+export function isSustainSensitive(nodeIds: readonly string[]): boolean {
+  return nodeIds.some((id) => nodeById(id)?.sustainSensitive === true);
 }
 
 /**
@@ -114,6 +152,22 @@ function waitUntil(ts: number): Promise<void> {
 }
 
 /**
+ * How many beats of click a performance needs: enough for its last note to have
+ * one under it.
+ *
+ * Read off `atBeat` rather than taken from a constant, for the reason in the
+ * header. Eight quarter notes give eight beats and nine eighth notes give five,
+ * and neither drill has to know that the other exists.
+ */
+export function gridBeatsOf(expected: ExpectedPerformance): number {
+  let last = 0;
+  expected.events.forEach((event, i) => {
+    last = Math.max(last, event.atBeat ?? i);
+  });
+  return Math.max(1, Math.floor(last) + 1);
+}
+
+/**
  * Start the metronome and put the grid on the spec.
  *
  * The count-in is what makes this possible: the clicks are scheduled ahead of
@@ -126,8 +180,8 @@ function waitUntil(ts: number): Promise<void> {
 function withGrid(prompt: PendingPrompt): PendingPrompt {
   const plan = session.startPulse({
     bpm: prompt.expected.tempoBpm ?? 100,
-    countInBeats: PULSE_COUNT_IN,
-    beats: PULSE_BEATS,
+    countInBeats: COUNT_IN_BEATS,
+    beats: gridBeatsOf(prompt.expected),
   });
   return plan ? { ...prompt, gridStartMs: plan.gridStartMs } : prompt;
 }

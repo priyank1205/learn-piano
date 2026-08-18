@@ -19,7 +19,8 @@
  */
 
 import type { NormalizedEvent } from '../midi.ts';
-import type { TimingStats } from '../grade/index.ts';
+import type { TimingStats } from '../grade/types.ts';
+import { DEFAULT_TOLERANCES } from '../grade/types.ts';
 import type { Track } from '../tree.ts';
 
 /**
@@ -103,7 +104,15 @@ export interface RepRow {
   correct: boolean;
   latencyMs: number | null;
   timingStats: TimingStats | null;
-  /** Legato and articulation drills. Absent for everything V1 grades today. */
+  /**
+   * Share of melodic transitions inside the legato band. Written by the legato
+   * grader and absent for every other family, which is what the field is for:
+   * `architecture.md` section 8 lists it optional because only two of the six
+   * graders can produce one. It is the share **against the band in force when
+   * the rep was graded**, and that band is a setting, so a row is only
+   * comparable with another row from the same calibration. `noteOverlapMs` in
+   * the rawMidi buffer is what survives a band change.
+   */
   inBandShare?: number;
   /** Set when this rep was a component of a fused exercise (section 5.4). */
   fusedFrom?: string;
@@ -193,6 +202,17 @@ export interface Settings {
   lateBudgetMin: number;
   targetShares: Record<Track, number>;
   latencyBandsMs: { automaticMs: number; knownMs: number };
+  /**
+   * The legato target band, `[floor, ceiling]` in ms of overlap.
+   *
+   * A setting rather than a constant because architecture.md section 9.1 puts it
+   * first on the list of numbers that will be wrong: it was calibrated off one
+   * captured log, and the fix if it is wrong is to set the edges at the user's
+   * own p25/p75 and walk them toward [10, 60] over sessions. The trainer's
+   * calibration panel is where that happens; the tree's own `overlapBandMs` is
+   * where it starts.
+   */
+  legatoBandMs: [number, number];
   /** Max new items per day, across all nodes (section 3). */
   newItemsPerDay: number;
   /** Softmax temperature for item selection (section 4). */
@@ -216,6 +236,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'firstRunAt'> = {
   lateBudgetMin: 10,
   targetShares: { 'keyboard-theory': 0.4, 'physical-rhythm': 0.35, ear: 0.25 },
   latencyBandsMs: { automaticMs: 1200, knownMs: 3000 },
+  legatoBandMs: [...DEFAULT_TOLERANCES.legatoBandMs],
   newItemsPerDay: 8,
   selectionTemperature: 0.7,
   leechLapses: 8,

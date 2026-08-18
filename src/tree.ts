@@ -128,6 +128,44 @@ export function timedRunOf(id: string): TimedRun | null {
 }
 
 /**
+ * `legato` thresholds (architecture.md section 7). Read the same way `timedRun`
+ * is: the numbers a pass is judged against belong to the curriculum, so the
+ * drill hands the per-rep half (`inBandShare`) to the grader and the per-node
+ * half (`cleanPasses`, `perHand`) stays in `schedule/mastery.ts`.
+ *
+ * `overlapBandMs` is the one number here that does **not** reach the grader from
+ * this row. It is a global tolerance and a setting, because architecture.md
+ * section 9.1 puts it first on the list of numbers that will be wrong and says
+ * the fix is to move it toward the user's own distribution over sessions. The
+ * tree's value is the default that setting starts at, which `legato.test.ts`
+ * asserts, so the curriculum still owns where it began.
+ */
+export interface Legato {
+  tempoBpm: number;
+  notesPerBeat: number;
+  overlapBandMs: [number, number];
+  inBandShare: number;
+  thumbUnderInBandShare?: number;
+  cleanPasses: number;
+  perHand: boolean;
+}
+
+export function legatoOf(id: string): Legato | null {
+  const t = BY_ID.get(id)?.masteryThreshold;
+  if (!t || t.type !== 'legato') return null;
+  const band = Array.isArray(t.overlapBandMs) ? t.overlapBandMs : [];
+  return {
+    tempoBpm: numberOr(t.tempoBpm, 72),
+    notesPerBeat: numberOr(t.notesPerBeat, 2),
+    overlapBandMs: [numberOr(band[0], 10), numberOr(band[1], 60)],
+    inBandShare: numberOr(t.inBandShare, 0.85),
+    thumbUnderInBandShare: optionalNumber(t.thumbUnderInBandShare),
+    cleanPasses: numberOr(t.cleanPasses, 3),
+    perHand: t.perHand === true,
+  };
+}
+
+/**
  * `earDeck` thresholds (architecture.md section 7). The only threshold shape in
  * the tree that is judged over a **rolling window of recent reps** rather than
  * per item: "answer matches; rolling window". That is why `nodeProgress` takes

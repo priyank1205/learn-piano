@@ -125,12 +125,41 @@ describe('node mastery', () => {
     expect(nodeWeight(p)).toBe(1.3);
   });
 
-  it('says plainly that a threshold type it cannot measure is unmeasured', () => {
-    // pr-legato-5finger is a `legato` threshold and the legato grader does not
-    // exist. Reporting 0% would read as failing rather than as unbuilt.
+  /**
+   * Slice 6 asserted that `pr-legato-5finger` was unmeasurable, because its
+   * threshold type is `legato` and the legato grader did not exist. Slice 7
+   * built it, so the assertion inverts rather than being deleted: the list and
+   * the grader registry are meant to move together, and this is the test that
+   * notices when one moves without the other.
+   */
+  it('measures a legato node now that the legato grader exists', () => {
     const p = nodeProgress(new Map()).get('pr-legato-5finger')!;
+    expect(p.measurable).toBe(true);
+    expect(p.drillable).toBe(true);
+    // Measurable is not complete: it still has to be practised, and it is locked
+    // behind the pulse drill until that node is at 80%.
+    expect(p.complete).toBe(false);
+    expect(p.lifecycle).toBe('locked');
+  });
+
+  it('says plainly that a threshold type it cannot measure is unmeasured', () => {
+    // pr-articulation is an `articulation` threshold and that grader does not
+    // exist. Reporting 0% would read as failing rather than as unbuilt.
+    const p = nodeProgress(new Map()).get('pr-articulation')!;
+    expect(p.node.masteryThreshold.type).toBe('articulation');
     expect(p.measurable).toBe(false);
     expect(p.complete).toBe(false);
+  });
+
+  it('keeps the measurable list and the grader registry in step', () => {
+    // The two lists only make sense together (`MEASURABLE_THRESHOLDS`): a
+    // threshold type nothing can grade reports 0% where it means "not built".
+    for (const p of nodeProgress(new Map()).values()) {
+      if (!p.measurable) continue;
+      expect(['deckFluency', 'timedRun', 'earDeck', 'legato']).toContain(
+        p.node.masteryThreshold.type
+      );
+    }
   });
 });
 

@@ -30,10 +30,11 @@
  * window, and the prompt says which. Naming it also stops the drill from
  * quietly becoming a two-note exercise when a finger slips.
  *
- * **Eight beats after a four-beat count-in.** Eight is enough for a standard
- * deviation to mean anything and short enough that a rep is about as long as a
- * flashcard rep at this tempo, which is what keeps the session budget honest.
- * The count-in is not graded: `audio/transport.ts` puts beat 0 after it.
+ * **Eight beats after the count-in.** Eight is enough for a standard deviation
+ * to mean anything and short enough that a rep is about as long as a flashcard
+ * rep at this tempo, which is what keeps the session budget honest. The count-in
+ * is not graded and is not this drill's to declare: `audio/transport.ts` owns
+ * `COUNT_IN_BEATS` and puts beat 0 after it.
  *
  * **The pass numbers come from the tree.** `meanAbsErrMsMax` and `timingSdMsMax`
  * are the node's, read through `timedRunOf`, not restated here. When they move,
@@ -54,9 +55,8 @@ export const RHYTHM_TAP_ID = 'rhythm-tap';
 
 const PULSE_NODE = 'pr-pulse-sync';
 
-/** Beats that are graded, and beats that only count you in. */
+/** Beats that are graded. The count-in is the app's, in `audio/transport.ts`. */
 export const PULSE_BEATS = 8;
-export const PULSE_COUNT_IN = 4;
 
 /** One key per hand, either side of the default split point (60 = C4). */
 export const HAND_PITCH: Record<RhythmTapParams['hand'], number> = { L: 48, R: 60 };

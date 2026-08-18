@@ -36,12 +36,16 @@ import type { DrillItem, PracticeMode, PracticeRep, PromptView } from './drills/
 import { store, useProgressStore } from './store/index.ts';
 import {
   LATENCY_BANDS,
+  OVERLAP_CLASSES,
+  OVERLAP_CLASS_LABELS,
   latencyBand,
   latencyBandLabel,
   runner,
+  summariseOverlap,
   useGradeRunner,
+  withTolerances,
 } from './grade/index.ts';
-import type { GradeResult } from './grade/index.ts';
+import type { GradeResult, OverlapSummary } from './grade/index.ts';
 import { NODES, deckFluencyOf, nodeById, nodeName } from './tree.ts';
 import { noteNameOf, pitchClassName } from './theory.ts';
 import { beatIndexAt, session, useAudioSession, useAudioTick } from './audio/index.ts';
@@ -73,6 +77,22 @@ const countErrors = (result: GradeResult): number =>
   result.noteErrors.missing.length +
   result.noteErrors.extra.length +
   result.noteErrors.wrong.length;
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+/**
+ * The overlaps of one rep, against the band it was graded under.
+ *
+ * Read off the result and the spec rather than off the drill: a rep that
+ * measured note overlap is a legato rep, whatever template produced it, and the
+ * band is on the spec because that is where the calibration was merged in.
+ */
+const overlapOf = (rep: PracticeRep): OverlapSummary | null => {
+  const byHand = rep.rep.result.noteOverlapMs;
+  return byHand === null
+    ? null
+    : summariseOverlap(byHand, withTolerances(rep.rep.spec.grading.tolerances));
+};
 
 /**
  * How a note is named back to the user: as a pitch class when the drill graded
@@ -158,16 +178,30 @@ function PulseBar() {
 
 /** What one graded rep is worth saying, in the terms that rep was measured in. */
 function ResultLine({
-  result,
+  rep,
   view,
   timed,
 }: {
-  result: GradeResult;
+  rep: PracticeRep;
   view: PromptView;
   timed: boolean;
 }) {
+  const result = rep.rep.result;
+  const overlap = overlapOf(rep);
+
   if (!result.correct) {
     return <span className="bad">{view.answer}</span>;
+  }
+  // A rep that measured overlap is a legato rep, and the share is what it was
+  // judged on. Asked of the result rather than of the drill, like everything
+  // else on this screen.
+  if (overlap !== null) {
+    return (
+      <span className="ok">
+        connected
+        <span className="band automatic">{pct(overlap.inBandShare)} in band</span>
+      </span>
+    );
   }
   if (timed && result.timingErrorMs !== null) {
     const timing = result.timingErrorMs;
@@ -233,7 +267,9 @@ function PromptCard({
         {result === null && r.state !== 'presenting' && (
           <span className="muted">{timed ? 'play with the click' : 'waiting'}</span>
         )}
-        {result !== null && <ResultLine result={result} view={view} timed={timed} />}
+        {result !== null && last !== null && (
+          <ResultLine rep={last} view={view} timed={timed} />
+        )}
       </div>
     </div>
   );
@@ -248,6 +284,11 @@ function MissDetail({ rep, view }: { rep: PracticeRep; view: PromptView }) {
   const { result, spec } = rep.rep;
   const name = nameFor(spec.constraints.octaveEquivalent === true, view.sharps);
   const event = result.perEvent[0];
+  const overlap = overlapOf(rep);
+
+  if (overlap !== null) {
+    return <LegatoDetail result={result} overlap={overlap} />;
+  }
 
   if (isTimed(rep)) {
     return <TimingDetail result={result} />;
@@ -328,6 +369,188 @@ function TimingDetail({ result }: { result: GradeResult }) {
         {result.perEvent.filter((e) => e.index >= 0).length} beats inside the window
       </li>
     </ul>
+  );
+}
+
+/**
+ * Why a legato run did not pass, which is a different question from why a timed
+ * one did not.
+ *
+ * The distinction that matters here is the same one `ratingForPass` draws: right
+ * notes with the hand letting go early is a near miss and comes back as `hard`,
+ * while wrong notes mean the pattern itself is not there. Saying which is which
+ * is the difference between a drill that teaches release timing and a drill that
+ * says "no" to someone who played every note.
+ */
+function LegatoDetail({
+  result,
+  overlap,
+}: {
+  result: GradeResult;
+  overlap: OverlapSummary;
+}) {
+  const notes = countErrors(result);
+
+  if (notes > 0) {
+    return (
+      <ul className="errors">
+        <li>
+          <strong>{notes}</strong> note{notes === 1 ? '' : 's'} missing, extra or wrong.
+          Play the pattern before playing it joined up.
+        </li>
+      </ul>
+    );
+  }
+
+  if (overlap.transitions === 0) {
+    return (
+      <ul className="errors">
+        <li>nothing to measure. Four clicks count you in, then play on every click.</li>
+      </ul>
+    );
+  }
+
+  const worst = OVERLAP_CLASSES.filter((c) => c !== 'in-band').sort(
+    (a, b) => overlap.counts[b] - overlap.counts[a]
+  )[0]!;
+
+  return (
+    <ul className="errors">
+      <li>
+        every note landed. <strong>{pct(overlap.inBandShare)}</strong> of the joins were
+        in the band, and the rest were mostly{' '}
+        <strong>{OVERLAP_CLASS_LABELS[worst]}</strong>.
+      </li>
+      <li className="muted">
+        {worst === 'detached' || worst === 'near-legato'
+          ? 'Letting go too early. Hold each key until the next one is already down.'
+          : 'Holding on too long. The old key has to come up just after the new one lands, not later.'}
+      </li>
+      <li className="muted">
+        <OverlapBars counts={overlap.counts} />
+      </li>
+    </ul>
+  );
+}
+
+/** The five bands of architecture.md section 5, as counts. */
+function OverlapBars({ counts }: { counts: OverlapSummary['counts'] }) {
+  const total = OVERLAP_CLASSES.reduce((n, c) => n + counts[c], 0);
+  if (total === 0) return null;
+  return (
+    <span className="overlap-bars">
+      {OVERLAP_CLASSES.map((c) => (
+        <span key={c} className={`overlap ${c}`} title={OVERLAP_CLASS_LABELS[c]}>
+          <span className="overlap-count">{counts[c]}</span>
+          <span className="overlap-label">{OVERLAP_CLASS_LABELS[c]}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * The legato band, and the distribution it is supposed to be set from.
+ *
+ * architecture.md section 9.1 puts this band first on the list of numbers that
+ * will be wrong: it was calibrated off one captured log showing ~60ms overlaps,
+ * which puts the user at the smeared edge of [10, 60] on day one. Its own
+ * instruction for fixing it is precise - "set the band edges at his current
+ * p25/p75 and walk them toward [10, 60] over sessions" - so the control sits
+ * beside the p25 and p75 it is meant to be set from, and the button does exactly
+ * what that sentence says.
+ *
+ * The one thing it will not do is move on its own. A threshold that recalibrates
+ * itself to whatever the hand is doing is not a threshold.
+ */
+function LegatoBandPanel({ reps }: { reps: readonly PracticeRep[] }) {
+  const s = useProgressStore();
+  const [floor, ceil] = s.settings.legatoBandMs;
+
+  // Every overlap of the session, re-read against the band in force now rather
+  // than against the one each rep was graded under, because this panel is about
+  // where the band should be and not about who passed.
+  const sample = useMemo(() => {
+    const byHand = reps.flatMap((r) => r.rep.result.noteOverlapMs ?? []);
+    return byHand.length === 0
+      ? null
+      : summariseOverlap(byHand, withTolerances({ legatoBandMs: [floor, ceil] }));
+  }, [reps, floor, ceil]);
+
+  if (sample === null) return null;
+
+  const setBand = (next: [number, number]) => {
+    void store.writeSettings({
+      legatoBandMs: [Math.round(next[0]), Math.round(next[1])],
+    });
+  };
+
+  return (
+    <div className="panel">
+      <h2>
+        Legato band
+        <span className="h2-note">the number section 9.1 expects to be wrong</span>
+      </h2>
+
+      <div className="counters">
+        <div>
+          <span className="num">{pct(sample.inBandShare)}</span>
+          <span className="lbl">in band</span>
+        </div>
+        <div>
+          <span className="num">
+            {sample.medianMs === null ? '-' : ms(sample.medianMs)}
+          </span>
+          <span className="lbl">median overlap</span>
+        </div>
+        <div>
+          <span className="num">{sample.transitions}</span>
+          <span className="lbl">joins measured</span>
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <label>
+          band
+          <input
+            type="number"
+            step={5}
+            value={floor}
+            onChange={(e) => setBand([Number(e.target.value), ceil])}
+          />
+        </label>
+        <label>
+          to
+          <input
+            type="number"
+            step={5}
+            value={ceil}
+            onChange={(e) => setBand([floor, Number(e.target.value)])}
+          />
+          ms
+        </label>
+        <button
+          disabled={sample.p25Ms === null || sample.p75Ms === null}
+          title="architecture.md section 9.1: set the band edges at his current p25/p75, then walk them toward [10, 60] over sessions."
+          onClick={() => setBand([sample.p25Ms!, sample.p75Ms!])}
+        >
+          Use this session ({sample.p25Ms === null ? '-' : ms(sample.p25Ms)} to{' '}
+          {sample.p75Ms === null ? '-' : ms(sample.p75Ms)})
+        </button>
+        <span className="grow" />
+        <button disabled={floor === 10 && ceil === 60} onClick={() => setBand([10, 60])}>
+          Back to [10, 60]
+        </button>
+      </div>
+
+      <p className="note muted">
+        Widening the band is how the tree&apos;s stage ladder is climbed: stage 1 is
+        awareness at [0, 80], stage 3 is mastery at [10, 60]. Moving it changes how the
+        next rep is graded and not how the last one was, so a session graded under two
+        bands is two samples rather than one. The raw overlaps are kept either way, so an
+        old session can be re-read against a new band.
+      </p>
+    </div>
   );
 }
 
@@ -749,6 +972,9 @@ export default function TrainerScreen() {
 
       <div className="panels">
         <SessionPanel reps={p.reps} nodeIds={p.nodeIds} />
+        {/* Only once the session has produced overlaps. It is a calibration
+            surface, and there is nothing to calibrate against yet otherwise. */}
+        <LegatoBandPanel reps={p.reps} />
         <WorkListPanel reps={p.reps} />
         <HistoryPanel reps={p.reps} />
       </div>

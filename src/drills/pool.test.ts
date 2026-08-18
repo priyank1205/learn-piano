@@ -244,6 +244,10 @@ describe('instantiate', () => {
 
 describe('the registry', () => {
   it('names what it has when asked for something it does not', () => {
-    expect(() => drillFor('legato-line')).toThrow(/inversion-trainer/);
+    // `legato-line` was the example here until slice 7 built it. Any id that is
+    // genuinely not registered does: what is being tested is that the failure
+    // names the registry rather than returning undefined.
+    expect(() => drillFor('pedal-sync')).toThrow(/inversion-trainer/);
+    expect(() => drillFor('pedal-sync')).toThrow(/legato-line/);
   });
 });

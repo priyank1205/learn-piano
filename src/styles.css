@@ -1008,3 +1008,93 @@ button.deck.active {
   padding: 0.1rem 0.4rem;
   font-size: 0.72rem;
 }
+
+/*
+ * Slice 7: the legato bands and the chord HUD.
+ *
+ * The five overlap classes are laid out as a strip rather than as a chart
+ * because there are five of them and the only question being asked is "which of
+ * these is the hand doing". A bar chart of five integers is a chart nobody
+ * reads; five labelled counts with the target one highlighted is read at a
+ * glance, which is all the feedback after a rep gets.
+ */
+.overlap-bars {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.overlap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 4.6rem;
+  padding: 0.25rem 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+.overlap-count {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  color: var(--dim);
+}
+
+.overlap-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.03em;
+  color: var(--dim);
+}
+
+/* The target. Everything either side of it is a direction to move in. */
+.overlap.in-band {
+  border-color: var(--ok);
+}
+
+.overlap.in-band .overlap-count {
+  color: var(--ok);
+}
+
+/* Letting go early and holding on too long are opposite faults, so they are
+   coloured apart: one is the hand rushing off, the other is sustain by hand. */
+.overlap.detached .overlap-count,
+.overlap.near-legato .overlap-count {
+  color: var(--accent);
+}
+
+.overlap.smeared .overlap-count,
+.overlap.held-over .overlap-count {
+  color: var(--warn);
+}
+
+.overlap.held-over {
+  border-color: var(--warn);
+}
+
+.hud .prompt-card.hud-now {
+  min-height: 9rem;
+}
+
+/*
+ * The HUD names what is sounding with tonal's best guess, which is heuristic and
+ * sometimes surprising (E-G-C reads as Em#5 before it reads as C/E). Rendering
+ * it a shade quieter than a drill prompt is the visual half of that caveat: it
+ * is an observation, not a verdict.
+ */
+.hud .prompt-symbol {
+  color: var(--fg);
+  opacity: 0.95;
+}
+
+.hud .cc-table td .flag {
+  margin-left: 0.4rem;
+  color: var(--ok);
+}
+
+.hud .rep-list .muted {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}

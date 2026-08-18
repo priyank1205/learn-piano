@@ -20,6 +20,7 @@ import { INVERSION_TRAINER_ID, inversionTrainer } from './inversionTrainer.ts';
 import { NOTE_FIND_ID, noteFind } from './noteFind.ts';
 import { RHYTHM_TAP_ID, rhythmTap } from './rhythmTap.ts';
 import { EAR_ID, earId } from './earId.ts';
+import { LEGATO_ID, legatoLine } from './legato.ts';
 import { buildItems } from './pool.ts';
 import type { DrillItem, DrillParams, DrillTemplate } from './types.ts';
 
@@ -40,6 +41,7 @@ export const DRILLS: Record<string, AnyDrillTemplate> = {
   [NOTE_FIND_ID]: noteFind as unknown as AnyDrillTemplate,
   [INVERSION_TRAINER_ID]: inversionTrainer as unknown as AnyDrillTemplate,
   [RHYTHM_TAP_ID]: rhythmTap as unknown as AnyDrillTemplate,
+  [LEGATO_ID]: legatoLine as unknown as AnyDrillTemplate,
   [EAR_ID]: earId as unknown as AnyDrillTemplate,
 };
 

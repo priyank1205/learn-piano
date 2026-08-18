@@ -334,6 +334,70 @@ export function hasLatency(state: ItemState): boolean {
 }
 
 /**
+ * Is this item in the SRS at all?
+ *
+ * Until slice 7 the answer was "does it have a state", because the only thing
+ * that ever created one was a graded rep. The free-play harvest
+ * (session-generator.md section 8) breaks that: it attaches a `latEMA` to items
+ * nobody has been prompted on, and section 8 is explicit that those reps are
+ * "never scheduling". A state row is where a `latEMA` lives, so the presence of
+ * one can no longer mean the item has been practised - `reps > 0` does, and it
+ * is the only thing that ever did.
+ *
+ * Without this the harvest would be worse than useless: `newItemState` sets
+ * `dueAt` to now, so a harvested chord would arrive in the due pool the instant
+ * it was overheard, jumping the daily faucet it was never counted against.
+ */
+export const inSchedule = (state: ItemState | undefined): boolean =>
+  state !== undefined && state.reps > 0;
+
+/**
+ * session-generator.md section 8's alpha: "Reps harvested from free-play HUD
+ * mode update `latEMA` only, with alpha 0.1 - low-trust telemetry, never
+ * scheduling."
+ */
+export const HARVEST_ALPHA = 0.1;
+
+/**
+ * The free-play harvest (session-generator.md section 8), as arithmetic.
+ *
+ * Nothing but `latEMA` moves. No rep, no rating, no `dueAt`, no `reps`, no
+ * `accEMA`, no history entry, no `introducedAt`. Section 8 is explicit that this
+ * is reconnaissance rather than practice: "the app earns value from him
+ * **before** demanding anything", and an item the app has never asked for must
+ * not become an item the app has a schedule for.
+ *
+ * **The nudge only ever goes up**, which the spec says in the sentence that
+ * describes it: "Chords whose change latency is consistently **slow** get their
+ * corresponding items' `latEMA` nudged". Written the obvious symmetric way it
+ * would be a hole in the measurement rather than a source for it, because free
+ * play is unprompted: a chord that happens to fall under the hand twice in a row
+ * would report a latency nobody was being timed on, and the item would read
+ * automatic without ever having been asked. Upward-only means the HUD can tell
+ * the app which chords are slow and can never tell it which are fast.
+ *
+ * That is also why an item with no latency at all is treated as if it were at
+ * the automatic threshold: seeding it from below would be that same unearned
+ * claim, made from an empty EMA instead of against a full one.
+ */
+export function nudgeLatency(
+  state: ItemState,
+  latencyMs: number,
+  now: number,
+  bands: LatencyBands = LATENCY_BANDS
+): ItemState {
+  if (!Number.isFinite(latencyMs) || latencyMs <= 0) return state;
+  const seeded = hasLatency(state);
+  const baseline = seeded ? state.latEMA : bands.automaticMs;
+  if (latencyMs <= baseline) return state;
+  return {
+    ...state,
+    latEMA: ema(seeded ? state.latEMA : null, latencyMs, HARVEST_ALPHA),
+    updatedAt: now,
+  };
+}
+
+/**
  * Bring a suspended leech back. Nothing does this automatically: section 9 is
  * explicit that a leech needs "a different approach", and re-serving the same
  * failing form on a timer is precisely the thing it forbids. The lapse count

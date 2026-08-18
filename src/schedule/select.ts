@@ -23,7 +23,7 @@ import type { ItemState, ReturnMode } from '../store/types.ts';
 import type { NodeProgress } from './mastery.ts';
 import { itemNodeWeight } from './mastery.ts';
 import { DAY_MS } from '../store/weeks.ts';
-import { intervalCapDays } from './srs.ts';
+import { inSchedule, intervalCapDays } from './srs.ts';
 import type { Rng } from './srs.ts';
 
 /** section 4: still served, less often. */
@@ -219,7 +219,7 @@ export class SessionPlanner {
 
     const due = opts.pool
       .map((item) => ({ item, state: opts.states.get(item.itemId) }))
-      .filter((d): d is { item: DrillItem; state: ItemState } => d.state !== undefined)
+      .filter((d): d is { item: DrillItem; state: ItemState } => inSchedule(d.state))
       .filter((d) => d.state.status !== 'suspended' && d.state.dueAt <= opts.now);
 
     const eligible = opts.returnMode === 're-entry' ? strongestHalf(due) : due;
@@ -329,12 +329,14 @@ export class SessionPlanner {
     const started = new Set<string>();
     if (guard) {
       for (const state of this.opts.states.values()) {
+        // A node is not "underway" because the HUD overheard one of its chords.
+        if (!inSchedule(state)) continue;
         for (const id of state.nodeIds) started.add(id);
       }
     }
 
     const fresh = this.opts.pool.filter((item) => {
-      if (this.opts.states.has(item.itemId)) return false;
+      if (inSchedule(this.opts.states.get(item.itemId))) return false;
       if (this.servesOf(item.itemId) > 0) return false;
       if (guard && !item.nodeIds.some((id) => started.has(id))) return false;
       return true;

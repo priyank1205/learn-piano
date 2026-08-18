@@ -9,12 +9,14 @@ import AudioScreen from './Audio.tsx';
 import GraderScreen from './Grader.tsx';
 import TrainerScreen from './Trainer.tsx';
 import ProgressScreen from './Progress.tsx';
+import HudScreen from './Hud.tsx';
 import { audio, session, useAudioSession } from './audio/index.ts';
 import { store } from './store/index.ts';
 
 const ROUTES = [
   { path: '/', label: 'Home' },
   { path: '/train', label: 'Train' },
+  { path: '/hud', label: 'Chord HUD' },
   { path: '/progress', label: 'Progress' },
   { path: '/grader', label: 'Grader bench' },
   { path: '/audio', label: 'Audio out' },
@@ -66,29 +68,36 @@ function AudioControl() {
 function Home() {
   return (
     <div className="home">
-      <h2>Slice 6: the seeding drills</h2>
+      <h2>V1 is built</h2>
       <p>
-        All three tracks have something to practise now. <strong>Note find</strong> is the
-        keyboard-geography deck the whole theory track sits behind,{' '}
-        <strong>pulse sync</strong> is quarter notes against the Transport click, and{' '}
-        <strong>interval ear training</strong> plays two notes and asks for the second
-        one. With the triads that makes four drills, and <a href="#/train">a session</a>{' '}
-        now moves between them.
+        <code>CLAUDE.md</code> names three drills and puts a hard stop after them. All
+        three exist: the <strong>inversion trainer</strong>, the{' '}
+        <strong>chord HUD</strong>, and <strong>finger legato</strong>, plus the three
+        seeding drills the tree needed before any of them could be reached. Seven decks
+        across three tracks now run through <a href="#/train">one screen</a> that knows
+        the id of none of them.
       </p>
       <p>
-        Today&apos;s session is the scheduler doing the choosing. Correctness gates and
-        latency grades, so an answer under 1.2 seconds pushes the item further out than a
-        correct answer at four seconds does. The pulse drill is the exception and is
-        judged on where the notes landed instead. Order is softmax-sampled rather than
-        sorted, missed items come back after three to six others, and a gap of a few days
-        makes the next session smaller instead of presenting a wall. Free practice is
-        still there for hammering one deck by hand.
+        <strong>Finger legato</strong> is the one that measures a note-off. It grades the
+        gap between letting one key up and putting the next one down, which is the thing
+        the instrument&apos;s permanent sustain has been hiding: the same playing sounds
+        identical through the keyboard and is plainly detached in the MIDI stream. It
+        plays through the app&apos;s dry piano for exactly that reason, and the target
+        band is adjustable, because it was calibrated off a single captured log and is the
+        first number expected to be wrong.
       </p>
       <p>
-        <a href="#/progress">Progress</a> counts <strong>sessions per week</strong>, which
-        is the only number that matters for the next fortnight: five or more says the
-        design is holding, three or fewer says make the sessions shorter rather than tune
-        anything.
+        The <a href="#/hud">chord HUD</a> is the one that asks for nothing. No prompts and
+        nothing graded: play a chart the way you already do, and it names what you played
+        and times how long the hand took to get there. Chords it finds you consistently
+        slow on start their first real rep with a slower assumption. That is the whole of
+        what it does with it.
+      </p>
+      <p>
+        So the next thing to build is nothing. <a href="#/progress">Progress</a> counts{' '}
+        <strong>sessions per week</strong>, which is the only number that matters for the
+        next fortnight: five or more says the design is holding, three or fewer says make
+        the sessions shorter rather than tune anything.
       </p>
       <p>
         The <a href="#/grader">grader bench</a> is the place to watch one rep being
@@ -140,6 +149,8 @@ export default function App() {
           <GraderScreen />
         ) : route === '/train' ? (
           <TrainerScreen />
+        ) : route === '/hud' ? (
+          <HudScreen />
         ) : route === '/progress' ? (
           <ProgressScreen />
         ) : (

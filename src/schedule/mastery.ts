@@ -17,7 +17,14 @@
 
 import type { ItemState, RepRow } from '../store/types.ts';
 import type { Track, TreeNode } from '../tree.ts';
-import { NODES, deckFluencyOf, earDeckOf, nodeById, timedRunOf } from '../tree.ts';
+import {
+  NODES,
+  deckFluencyOf,
+  earDeckOf,
+  legatoOf,
+  nodeById,
+  timedRunOf,
+} from '../tree.ts';
 import { itemsForNode } from '../drills/registry.ts';
 import type { LatencyBands } from '../grade/index.ts';
 import { LATENCY_BANDS } from '../grade/index.ts';
@@ -37,15 +44,20 @@ export const MAX_LEARNING_TOTAL = 5;
 /**
  * The threshold types this build can measure, which is exactly the types the
  * graders that exist can produce (`grade/graders.ts`): `set` grades the decks
- * and the ear deck, `sequence` grades the timed runs. The other seven shapes in
- * architecture.md section 7 report "not built yet" rather than 0%, because a
- * node reading 0% looks like failure and a node with no grader is not being
- * failed at.
+ * and the ear deck, `sequence` grades the timed runs, `legato` grades release
+ * timing. The other six shapes in architecture.md section 7 report "not built
+ * yet" rather than 0%, because a node reading 0% looks like failure and a node
+ * with no grader is not being failed at.
  *
  * Adding a grader family means adding its threshold type here. The two lists
  * only make sense together.
  */
-export const MEASURABLE_THRESHOLDS = new Set(['deckFluency', 'timedRun', 'earDeck']);
+export const MEASURABLE_THRESHOLDS = new Set([
+  'deckFluency',
+  'timedRun',
+  'earDeck',
+  'legato',
+]);
 
 export type Lifecycle = 'locked' | 'unlocked' | 'learning' | 'complete';
 
@@ -93,7 +105,7 @@ function lastRepsCorrect(state: ItemState, n: number): boolean {
  * per-item field of the threshold (architecture.md section 7) and it exists to
  * stop three lucky reps counting as proof, which is a statement about an item.
  *
- * Three shapes, and the two new ones each needed a reading.
+ * Four shapes, and three of them needed a reading.
  *
  * **`timedRun` has no accuracy EMA to test.** Its `noteAccuracy: 1.0` is a
  * per-rep rule ("all notes matched", architecture.md section 7) and the grader
@@ -102,6 +114,14 @@ function lastRepsCorrect(state: ItemState, n: number): boolean {
  * instead would make mastery unreachable, since an EMA that has ever seen a miss
  * never returns to 1. So the item's bar is `cleanPasses` consecutive clean
  * passes, which is section 1.2's "last N reps all correct" with N from the tree.
+ *
+ * **`legato` reads identically to `timedRun`, and is written out anyway.**
+ * Section 1.2 groups them ("timedRun/legato/sync: last pass met the numeric
+ * threshold") and the grader has likewise already applied the numeric part: a
+ * legato rep is `correct` only when the notes were clean *and* the in-band share
+ * was met. What differs is where the count comes from - `cleanPasses` is 3 on
+ * both rows today and there is no reason it must stay that way - so the branch
+ * reads its own row rather than falling through to the timed one.
  *
  * **`earDeck`'s latency target is its own.** The 1200ms automatic band is a
  * keyboard-recall number and this deck's target is `medianResponseMsMax`, which
@@ -127,6 +147,11 @@ export function itemMastered(
     return state.reps >= timed.cleanPasses && lastRepsCorrect(state, timed.cleanPasses);
   }
 
+  const leg = legatoOf(node.id);
+  if (leg) {
+    return state.reps >= leg.cleanPasses && lastRepsCorrect(state, leg.cleanPasses);
+  }
+
   const ear = earDeckOf(node.id);
   if (ear) {
     if (!lastRepsCorrect(state, 3)) return false;
@@ -137,12 +162,22 @@ export function itemMastered(
   return false;
 }
 
-/** An item counts toward the automatic share once it has a latency under the band. */
+/**
+ * An item counts toward the automatic share once it has a latency under the
+ * band, **and has been asked for at least once**.
+ *
+ * The second half is the free-play harvest's doing (session-generator.md section
+ * 8). A harvested item has a `latEMA` and no reps, and `automaticShare` is the
+ * statistic the tree calls a deck complete on, so counting one would let a node
+ * approach completion on chords the app happened to overhear. The harvest is
+ * upward-only (`nudgeLatency`) and so cannot produce a fast number by itself,
+ * but that is a property of today's harvest rather than of this statistic.
+ */
 export function itemAutomatic(
   state: ItemState,
   bands: LatencyBands = LATENCY_BANDS
 ): boolean {
-  return hasLatency(state) && state.latEMA < bands.automaticMs;
+  return state.reps > 0 && hasLatency(state) && state.latEMA < bands.automaticMs;
 }
 
 /**
@@ -236,7 +271,10 @@ export function nodeProgress(
     let minReps = Infinity;
     for (const item of items) {
       const state = states.get(item.itemId);
-      if (!state) {
+      // A state row with no reps is free-play telemetry rather than practice: it
+      // carries a harvested `latEMA` and nothing else (`select.ts`'s
+      // `inSchedule`). It counts as an unseen item, which is what it is.
+      if (!state || state.reps === 0) {
         minReps = 0;
         continue;
       }
@@ -309,7 +347,7 @@ export function nodeProgress(
  * Has this node's threshold been met, per its type (section 1.2:
  * "nodeComplete(node) := threshold met per its type")?
  *
- * The three shapes read differently on purpose, because the documents define
+ * The four shapes read differently on purpose, because the documents define
  * them differently:
  *
  *  - `deckFluency`: `automaticShare` of the declared items under the automatic
@@ -317,6 +355,9 @@ export function nodeProgress(
  *  - `timedRun`: section 1.2 spells this one out as "cleanPasses recorded for
  *    every item", and `itemMastered` is already exactly that per item, so the
  *    node is complete when all of them are.
+ *  - `legato`: the same rule, from its own row. Both hands are already items
+ *    (`perHand`), so "every item" is what makes `perHand` bite: the share has to
+ *    be met with each hand separately or the node does not close.
  *  - `earDeck`: a rolling window, not a per-item count. A full window at or
  *    above the accuracy, with a median response at or under the maximum.
  */
@@ -339,6 +380,9 @@ function nodeThresholdMet(
 
   const timed = timedRunOf(node.id);
   if (timed) return stats.itemCount > 0 && stats.mastered >= stats.itemCount;
+
+  const leg = legatoOf(node.id);
+  if (leg) return stats.itemCount > 0 && stats.mastered >= stats.itemCount;
 
   const ear = earDeckOf(node.id);
   if (ear) {

@@ -45,14 +45,19 @@ import { adherenceReport, dayStart, nextReturnMode } from './weeks.ts';
 import type { AdherenceReport } from './weeks.ts';
 import {
   applyRating,
+  inSchedule,
   newItemState,
+  nudgeLatency,
   ratingFor,
   ratingForPass,
   revive,
 } from '../schedule/srs.ts';
-// Straight from the module rather than through `grade/index.ts`: the barrel
+// Straight from the modules rather than through `grade/index.ts`: the barrel
 // exports the runner, and the store has no business importing React.
 import { isClean } from '../grade/match.ts';
+import { summariseOverlap } from '../grade/legato.ts';
+import { withTolerances } from '../grade/types.ts';
+import type { Tolerances } from '../grade/types.ts';
 import type { DrillItem } from '../drills/types.ts';
 import { itemById } from '../drills/registry.ts';
 import type { Rep } from '../grade/index.ts';
@@ -182,6 +187,19 @@ class ProgressStore {
     this.settings = { ...this.settings, ...patch };
     await stores.settings.setItem('settings', this.settings);
     this.bump();
+  }
+
+  /**
+   * The tolerance overrides the user has calibrated, applied to every prompt the
+   * practice loop arms (`drills/present.ts`).
+   *
+   * One number so far. architecture.md section 9 names several that will need
+   * moving in the first fortnight and this is the mechanism they move through:
+   * a setting, merged over the template's own tolerances at instantiation, so
+   * that recalibrating a band is never a code edit and never a per-drill one.
+   */
+  tolerances(): Partial<Tolerances> {
+    return { legatoBandMs: this.settings.legatoBandMs };
   }
 
   /**
@@ -329,6 +347,14 @@ class ProgressStore {
         ? ratingFor(correct, latencyMs, this.settings.latencyBandsMs)
         : ratingForPass({ correct, notesClean: isClean(rep.result.noteErrors) });
 
+    // Only the legato grader fills `noteOverlapMs`, so only a legato rep gets an
+    // `inBandShare`. Summarised against the band this rep was graded under,
+    // which is the spec's own tolerances.
+    const overlap = rep.result.noteOverlapMs;
+    const inBandShare = overlap
+      ? summariseOverlap(overlap, withTolerances(rep.spec.grading.tolerances)).inBandShare
+      : undefined;
+
     const row: RepRow = {
       id: repKey(sessionId, this.seq),
       ts: now,
@@ -340,6 +366,7 @@ class ProgressStore {
       correct,
       latencyMs,
       timingStats: rep.result.timingErrorMs,
+      ...(inBandShare === undefined ? {} : { inBandShare }),
     };
     this.seq += 1;
 
@@ -392,9 +419,40 @@ class ProgressStore {
   dueNow(now: number = Date.now()): number {
     let n = 0;
     for (const state of this.itemState.values()) {
+      // `inSchedule`: a harvested row has a latEMA and no reps, and section 8
+      // says free-play telemetry never schedules. The planner draws its due pool
+      // by the same rule, so this count has to agree with it or the screen
+      // promises a session that will not be served.
+      if (!inSchedule(state)) continue;
       if (state.status !== 'suspended' && state.dueAt <= now) n += 1;
     }
     return n;
+  }
+
+  /**
+   * session-generator.md section 8's free-play harvest: nudge one item's
+   * `latEMA` from something the user played without being asked.
+   *
+   * Deliberately not `recordRep`. No rep row is written, no rating is applied,
+   * no session counter moves and nothing about scheduling changes, which is
+   * section 8's own boundary ("update `latEMA` only, with alpha 0.1 - low-trust
+   * telemetry, never scheduling"). The arithmetic, including the rule that the
+   * nudge only ever goes up, is in `nudgeLatency`.
+   */
+  async harvestLatency(itemId: string, latencyMs: number): Promise<void> {
+    const item = itemById(itemId);
+    if (!item) return;
+    const now = Date.now();
+    const previous =
+      this.itemState.get(itemId) ?? newItemState(itemId, item.nodeIds, now);
+    const next = nudgeLatency(previous, latencyMs, now, this.settings.latencyBandsMs);
+    // Unchanged means the observation was not slower than what is already known,
+    // which is most of them. Writing anyway would churn IndexedDB once a chord
+    // and, for an item with no state yet, would leave a row saying nothing.
+    if (next === previous) return;
+    this.itemState = new Map(this.itemState).set(itemId, next);
+    await stores.itemState.setItem(itemId, next);
+    this.bump();
   }
 
   /** Items suspended as leeches, surfaced once and never re-served silently. */

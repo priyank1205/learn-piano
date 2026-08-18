@@ -1,10 +1,11 @@
 /**
  * The grading layer's public surface.
  *
- * One grader contract, six grader families, two of them built. `set` covers
- * every untimed drill (the inversion trainer, note-find, ear-id) and `sequence`
- * covers everything played against a grid, which in V1 is the pulse drill; the
- * other four arrive with the drills that need them. `GRADERS` is a registry
+ * One grader contract, six grader families, three of them built. `set` covers
+ * every untimed drill (the inversion trainer, note-find, ear-id), `sequence`
+ * covers everything played against a grid, which in V1 is the pulse drill, and
+ * `legato` is `sequence` plus the one measurement finger legato is about; the
+ * other three arrive with the drills that need them. `GRADERS` is a registry
  * rather than a switch so that adding one is adding a file, and so a drill
  * template naming a grader that does not exist yet fails loudly at lookup
  * instead of quietly scoring zero.
@@ -35,6 +36,23 @@ export {
   sequenceGrader,
 } from './sequence.ts';
 export type { SequenceGrid } from './sequence.ts';
+export {
+  OVERLAP_CLASSES,
+  OVERLAP_CLASS_LABELS,
+  analyseOverlap,
+  classifyOverlap,
+  gradeLegato,
+  legatoFinished,
+  legatoGrader,
+  pairNotes,
+  summariseOverlap,
+} from './legato.ts';
+export type {
+  OverlapAnalysis,
+  OverlapClass,
+  OverlapSummary,
+  Transition,
+} from './legato.ts';
 export { GRADERS, graderFor } from './graders.ts';
 export { runner, useGradeRunner } from './runner.ts';
 export type { PendingPrompt, Presenter, Rep, RunnerState } from './runner.ts';

@@ -28,6 +28,16 @@ import { contextTimeToMidiTs } from './clock.ts';
 /** How long a beat lasts, from the tempo. The Transport agrees, by construction. */
 export const beatSecondsOf = (bpm: number): number => 60 / bpm;
 
+/**
+ * Clicks before beat 0, for every timed drill.
+ *
+ * Here rather than on a drill because it is a property of how a timed prompt is
+ * delivered, not of any one pattern. It lived on the pulse drill until a second
+ * timed drill arrived and the engine turned out to be reading one drill's
+ * constants to lay out another drill's grid.
+ */
+export const COUNT_IN_BEATS = 4;
+
 export interface PulseOptions {
   /** AudioContext seconds: when the Transport starts, i.e. the first count-in click. */
   startSec: number;

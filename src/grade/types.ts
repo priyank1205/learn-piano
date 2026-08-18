@@ -12,9 +12,9 @@
 import type { Hand, NormalizedEvent } from '../midi.ts';
 
 /**
- * The six grader families in architecture.md section 2. `set` (untimed) and
- * `sequence` (timed against a grid) exist; the other four arrive with the drills
- * that need them.
+ * The six grader families in architecture.md section 2. `set` (untimed),
+ * `sequence` (timed against a grid) and `legato` (release timing) exist; the
+ * other three arrive with the drills that need them.
  */
 export type GraderId = 'set' | 'sequence' | 'legato' | 'sync' | 'piece' | 'pedal';
 
@@ -178,12 +178,29 @@ export interface PassCriteria {
   handOnsetSkewMsMax?: number;
 }
 
+/**
+ * The per-rep half of architecture.md section 7's `legato` row.
+ *
+ * Separate from `PassCriteria` rather than a field on it, because the two rows
+ * are judged on different measurements and merging them would let a drill
+ * declare a bar its grader cannot see. `timedRun` asks whether the notes landed
+ * on the grid; `legato` asks when the previous one was released. The band
+ * itself is a tolerance (`legatoBandMs`), since it is global and the share is
+ * the node's.
+ */
+export interface LegatoCriteria {
+  /** Share of melodic transitions that must fall inside the band. */
+  inBandShare: number;
+}
+
 export interface GradingSpec {
   graderId: GraderId;
   weights?: Weights;
   tolerances?: Partial<Tolerances>;
   /** Timed drills only. Absent means identity alone decides correctness. */
   pass?: PassCriteria;
+  /** Legato drills only. Absent means the overlap is measured but not required. */
+  legato?: LegatoCriteria;
 }
 
 /**

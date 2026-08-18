@@ -405,7 +405,11 @@ class Practice {
     // The prepared item, not the pool item: an ear prompt is asked in a key
     // drawn for this rep, and the screen has to show the rep that was played.
     // Ids and nodes are the pool's, so the log and the SRS are unaffected.
-    this.current = presentItem(item);
+    //
+    // The tolerances are the user's calibration, merged over whatever the
+    // template declares. The legato band is the first number to travel this way
+    // and architecture.md section 9 promises more.
+    this.current = presentItem(item, { tolerances: store.tolerances() });
     this.bump();
   }
 

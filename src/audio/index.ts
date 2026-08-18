@@ -49,7 +49,7 @@ export const MAX_VOLUME_DB = 6;
 export { noteNameOf };
 
 /** The beat grid, re-exported so a screen can read a run without reaching past this module. */
-export { beatIndexAt, beatSecondsOf, planPulse } from './transport.ts';
+export { COUNT_IN_BEATS, beatIndexAt, beatSecondsOf, planPulse } from './transport.ts';
 export type { PulseOptions, PulsePlan } from './transport.ts';
 
 /**
